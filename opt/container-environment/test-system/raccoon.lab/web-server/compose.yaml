@@ -4,7 +4,7 @@ services:
   raccoon:
     image: localhost/raccoon:test
     container_name: raccoon-test-app
-    restart: unless-stopped
+    restart: always
     # Red del host: el proxy de consolas GNS3 abre puertos dinámicos
     # y necesita llegar a 127.0.0.1 de los workspaces
     network_mode: host

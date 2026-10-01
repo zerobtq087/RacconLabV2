@@ -1,1 +1,0 @@
-import{Gr as e,Kr as t,or as n,ut as r,yt as i}from"./VAvatar-CTtQn55L.js";function a(a,o=`div`,s){return r()({name:s??t(e(a.replace(/__/g,`-`))),props:{tag:{type:String,default:o},...i()},setup(e,{slots:t}){return()=>n(e.tag,{class:[a,e.class],style:e.style},t.default?.())}})}export{a as t};
