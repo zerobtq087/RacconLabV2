@@ -109,7 +109,7 @@ podman run --rm \
   -v "$BIN_DIR:/salida" \
   -w /src \
   -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 \
-  docker.io/library/golang:1.24-alpine \
+  docker.io/library/golang:1-alpine \
   go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o /salida/raccoon ./backend/cmd
 [ -x "$BIN_DIR/raccoon" ] || { echo "ERROR: el binario Go no se generó"; exit 1; }
 
