@@ -1,0 +1,30 @@
+# Raccoon Lab - db-engine (Firebird 5 + Redis 7)
+# Las variables ${...} salen de ../.env (raccoon.sh crea el enlace ./.env)
+# Solo escuchan en 127.0.0.1: nadie de la red entra directo a las BD
+services:
+  firebird:
+    image: docker.io/firebirdsql/firebird:5
+    container_name: raccoon-test-firebird
+    restart: always
+    ports:
+      - "127.0.0.1:${DB_PORT}:3050"
+    environment:
+      - FIREBIRD_ROOT_PASSWORD=${DB_PASSWORD}
+      - FIREBIRD_DATABASE=${DB_NAME}
+      - FIREBIRD_DATABASE_DEFAULT_CHARSET=UTF8
+      - FIREBIRD_DATABASE_PAGE_SIZE=8192
+      - TZ=America/Mexico_City
+    volumes:
+      - ./volumes/firebird:/var/lib/firebird/data:U
+
+  redis:
+    image: docker.io/library/redis:7-alpine
+    container_name: raccoon-test-redis
+    restart: always
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes", "--appendfsync", "everysec"]
+    environment:
+      - TZ=America/Mexico_City
+    volumes:
+      - ./volumes/redis:/data:U
