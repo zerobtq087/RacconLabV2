@@ -1,0 +1,32 @@
+!
+version 12.4
+service timestamps debug datetime msec
+service timestamps log datetime msec
+no service password-encryption
+!
+hostname {{ item.name }}
+!
+boot-start-marker
+boot-end-marker
+!
+interface FastEthernet0/0
+ ip address {{ router_ip }} {{ netmask }}
+ no shutdown
+exit
+!
+{% if routing_protocol == 'ospf' %}
+router ospf 1
+ log-adjacency-changes
+ network {{ network_address }} {{ wildcard }} area {{ ospf_area | default(0) }}
+exit
+!
+{% elif routing_protocol == 'rip' %}
+router rip
+ version 2
+ network {{ network_address }}
+ no auto-summary
+exit
+!
+{% endif %}
+!
+end

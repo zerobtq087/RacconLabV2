@@ -1,0 +1,23 @@
+# ===== Secretos =====
+.env
+**/.env
+
+# ===== Desarrollo =====
+node_modules/
+frontend/dist*/
+internal/web/dist/
+.vscode/
+.idea/
+*.log
+
+# ===== Datos del servidor (se crean en /opt, nunca en el repo) =====
+opt/container-environment/*/*/web-server/volumes/logs/
+opt/container-environment/*/*/db-engine/volumes/firebird/
+opt/container-environment/*/*/db-engine/volumes/redis/
+opt/container-environment/*/*/gns3/volumes/gns3_projects/
+opt/container-environment/*/*/gns3/volumes/gns3_images/
+opt/container-environment/*/*/backup/volumes/
+
+# OJO: SÍ se suben (como antes build_prod/):
+#   opt/container-environment/*/*/web-server/volumes/internal/web/dist/
+#   opt/container-environment/container-images/raccoon/build/raccoon

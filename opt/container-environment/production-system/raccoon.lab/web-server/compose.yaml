@@ -1,0 +1,17 @@
+# Raccoon Lab - web-server (app Go: API + frontend)
+# Se levanta con:  podman-compose up -d   (desde esta carpeta)
+services:
+  raccoon:
+    image: localhost/raccoon:production
+    container_name: raccoon-app
+    restart: unless-stopped
+    # Red del host: el proxy de consolas GNS3 abre puertos dinámicos
+    # y necesita llegar a 127.0.0.1 de los workspaces
+    network_mode: host
+    env_file:
+      - ../.env
+    environment:
+      - WEB_DIR=/app/web
+    volumes:
+      - ./volumes/internal/web/dist:/app/web:ro
+      - ./volumes/logs:/app/logs

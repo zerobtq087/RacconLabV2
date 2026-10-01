@@ -1,0 +1,302 @@
+---
+- name: Desplegar Topologia Dinamica RaccoonLAB
+  hosts: localhost
+  gather_facts: false
+
+  module_defaults:
+    ansible.builtin.uri:
+      headers:
+        Authorization: "Bearer {{ gns3_token }}"
+        X-Route-Token: "{{ gns3_token }}"
+        X-Access-Token: "{{ gns3_token }}"
+
+  vars:
+    gns3_url: "{{ gns3_url | default('http://127.0.0.1:30000') }}"
+    gns3_host: "{{ gns3_url | regex_replace('^https?://([^:]+).*', '\\1') }}"
+    gns3_token: "{{ gns3_token | default('') }}"
+
+  tasks:
+    - name: Leer definicion de la topologia parametrizada por Go
+      set_fact:
+        topology_file: "{{ topology_file | default('topology.json') }}"
+
+    - name: Cargar JSON de la topologia
+      set_fact:
+        lab_design: "{{ lookup('file', topology_file) | from_json }}"
+
+    - name: Mapear variables globales de configuracion desde el JSON mutado
+      set_fact:
+        target_subnet: "{{ lab_design.project_settings.subnet | default('172.16.0.0/16') }}"
+        serial_subnet: "{{ lab_design.project_settings.serial_subnet | default('10.0.0.0/24') }}"
+        routing_protocol: "{{ lab_design.project_settings.routing_protocol | default('none') | lower }}"
+        ospf_area: "{{ lab_design.project_settings.ospf_area | default(0) }}"
+
+    - name: Asegurar que el proyecto existe en GNS3
+      ansible.builtin.uri:
+        url: "{{ gns3_url }}/v2/projects"
+        method: POST
+        body_format: json
+        url_username: "admin"
+        url_password: "{{ gns3_token }}"
+        force_basic_auth: true
+        body:
+          name: "{{ project_name | default('RaccoonLAB_Session') }}"
+        status_code: [200, 201, 409]
+      register: project_status
+
+    - name: Recuperar proyectos existentes si hubo conflicto (409)
+      uri:
+        url: "{{ gns3_url }}/v2/projects"
+        method: GET
+      when: project_status.status == 409
+      register: existing_projects
+
+    - name: Definir ID del proyecto de forma segura
+      set_fact:
+        project_id: "{{ project_status.json.project_id if project_status.status != 409 else (existing_projects.json | selectattr('name', 'equalto', project_name) | map(attribute='project_id') | list | first) }}"
+
+    - name: Asegurar que el proyecto de GNS3 este abierto
+      uri:
+        url: "{{ gns3_url }}/v2/projects/{{ project_id }}/open"
+        method: POST
+        status_code: [201, 204, 400]
+
+    - name: Obtener inventario de nodos actuales en el proyecto
+      uri:
+        url: "{{ gns3_url }}/v2/projects/{{ project_id }}/nodes"
+        method: GET
+      register: existing_nodes
+
+    - name: Obtener IDs de las plantillas cargadas
+      uri:
+        url: "{{ gns3_url }}/v2/templates"
+        method: GET
+      register: gns3_templates
+
+    - name: Instanciar Nodos convencionales (Docker, Dynamips)
+      uri:
+        url: "{{ gns3_url }}/v2/projects/{{ project_id }}/templates/{{ gns3_templates.json | selectattr('name', 'equalto', item.template) | map(attribute='template_id') | first }}"
+        method: POST
+        body_format: json
+        body:
+          x: "{{ item.x }}"
+          y: "{{ item.y }}"
+          name: "{{ item.name }}"
+        status_code: [201, 409]
+      loop: "{{ lab_design.nodes }}"
+      when: 
+        - item.name not in (existing_nodes.json | map(attribute='name') | list)
+        - item.template != "Ethernet switch"
+      register: creation_results_conv
+
+    - name: Pre-calcular puertos del Ethernet Switch con mapeo de VLANs
+      set_fact:
+        switch_ports_map: "{{ switch_ports_map | default({}) | combine({ item.name: ports_list }) }}"
+      vars:
+        ports_list: >-
+          {% set ns = namespace(ports=[]) %}
+          {% set sw_vlans = item.vlans | default([]) %}
+          {% for p in range(0, 8) %}
+            {% set port_data = namespace(vlan=1, p_type="access") %}
+            
+            {# 1. Mapear VLANs asignadas en el arreglo 'vlans' del Switch #}
+            {% for v in sw_vlans %}
+              {% if p in (v.ports | default([])) %}
+                {% set port_data.vlan = v.id | int %}
+                {% set port_data.p_type = "access" %}
+              {% endif %}
+            {% endfor %}
+
+            {# 2. Marcar como dot1q (Trunk) si el puerto conecta a un Router Cisco #}
+            {% for link in lab_design.links %}
+              {% set p_int = p | int %}
+              {% if (link.node_a == item.name and link.port_a|int == p_int) or (link.node_b == item.name and link.port_b|int == p_int) %}
+                {% set target_name = link.node_b if link.node_a == item.name else link.node_a %}
+                {% set target_node = (lab_design.nodes | selectattr('name', 'equalto', target_name) | list | first) | default({}) %}
+                {% if target_node.type is defined and target_node.type == 'cisco' %}
+                  {% set port_data.p_type = "dot1q" %}
+                  {% set port_data.vlan = 1 %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+
+            {% set _ = ns.ports.append({
+              "port_number": p | int,
+              "name": "eth" ~ p,
+              "vlan": port_data.vlan | int,
+              "type": port_data.p_type,
+              "ethernet_type": "0x8100"
+            }) %}
+          {% endfor %}
+          {{ ns.ports | to_json }}
+      loop: "{{ lab_design.nodes }}"
+      when: item.type is defined and item.type == 'switch'
+
+    - name: Instanciar Switches integrados de GNS3 dinámicamente
+      uri:
+        url: "{{ gns3_url }}/v2/projects/{{ project_id }}/nodes"
+        method: POST
+        body_format: json
+        status_code: [200, 201, 409]
+        body:
+          name: "{{ item.name }}"
+          node_type: "ethernet_switch"
+          compute_id: "local"
+          x: "{{ item.x }}"
+          y: "{{ item.y }}"
+          properties:
+            ports: "{{ switch_ports_map[item.name] | from_json }}"
+      loop: "{{ lab_design.nodes }}"
+      when: 
+        - item.name not in (existing_nodes.json | map(attribute='name') | list)
+        - item.type is defined and item.type == 'switch'
+      register: creation_results_sw
+
+    - name: Consolidar resultados de la creacion de nodos
+      set_fact:
+        creation_results: { "results": "{{ (creation_results_conv.results | default([])) + (creation_results_sw.results | default([])) }}" }
+
+    - name: Forzar nombre correcto en GNS3 para nodos recien creados
+      uri:
+        url: "{{ gns3_url }}/v2/projects/{{ project_id }}/nodes/{{ item.1.json.node_id }}"
+        method: PUT
+        body_format: json
+        body:
+          name: "{{ item.0.name }}"
+        status_code: [200, 204]
+      when: 
+        - item.1.skipped is not defined
+        - item.1.json is defined
+        - item.1.json.node_id is defined
+      loop: "{{ lab_design.nodes | zip(creation_results.results) | list }}"
+
+    - name: Obtener inventario final unificado de nodos
+      uri:
+        url: "{{ gns3_url }}/v2/projects/{{ project_id }}/nodes"
+        method: GET
+      register: final_nodes
+
+    - name: Crear diccionario de mapeo definitivo para el cableado
+      set_fact:
+        node_map: "{{ dict(final_nodes.json | map(attribute='name') | zip(final_nodes.json | map(attribute='node_id'))) }}"
+
+    - name: Crear mapeo dinámico de tipos de nodo
+      set_fact:
+        node_types: "{{ dict(final_nodes.json | map(attribute='name') | zip(final_nodes.json | map(attribute='node_type'))) }}"
+
+    - name: Aplicar configuracion de VLANs y Trunks en el Switch via PUT API
+      uri:
+        url: "{{ gns3_url }}/v2/projects/{{ project_id }}/nodes/{{ node_map[item.name] }}"
+        method: PUT
+        body_format: json
+        status_code: [200, 204]
+        body:
+          properties:
+            ports: "{{ switch_ports_map[item.name] | from_json }}"
+      loop: "{{ lab_design.nodes }}"
+      when: item.type is defined and item.type == 'switch'
+
+    - name: Cablear enlaces entre dispositivos
+      ansible.builtin.uri:
+        url: "{{ gns3_url }}/v2/projects/{{ project_id }}/links"
+        method: POST
+        status_code: [200, 201, 409]
+        body_format: json
+        body:
+          nodes:
+            - node_id: "{{ node_map[item.node_a] }}"
+              adapter_number: "{{ 0 if node_types[item.node_a] == 'ethernet_switch' else item.port_a }}"
+              port_number: "{{ item.port_a if node_types[item.node_a] == 'ethernet_switch' else (item.port_a_sub | default(0)) }}"
+            - node_id: "{{ node_map[item.node_b] }}"
+              adapter_number: "{{ 0 if node_types[item.node_b] == 'ethernet_switch' else item.port_b }}"
+              port_number: "{{ item.port_b if node_types[item.node_b] == 'ethernet_switch' else (item.port_b_sub | default(0)) }}"
+      loop: "{{ lab_design.links }}"
+
+    - name: Inyectar interfaces de red estructuradas en Contenedores Docker
+      uri:
+        url: "{{ gns3_url }}/v2/projects/{{ project_id }}/nodes/{{ node_map[item.name] }}/files/etc/network/interfaces"
+        method: POST
+        body: |
+          auto eth0
+          iface eth0 inet static
+              address {{ host_ip }}
+              netmask {{ host_netmask }}
+              gateway {{ host_gateway }}
+              up echo 'nameserver 8.8.8.8' > /etc/resolv.conf
+        status_code: [200, 201]
+      vars:
+        # Mapea VLAN
+        vlan_info: "{{ (lab_design.project_settings.vlans | default([]) | selectattr('id', 'equalto', item.vlan | default(0)) | list | first) | default({}) }}"
+
+        # Mapea tags
+        ordered_lan_tags: "{{ tags_raw | from_yaml }}"
+        tags_raw: >-
+          {% set tags = [] %}
+          {% for n in lab_design.nodes %}
+            {% for iface in n.interfaces | default([]) %}
+              {% set tag = iface.subnet_tag | default('') %}
+              {% if tag != '' and 'link' not in tag and 'serial' not in tag and tag not in tags %}
+                {% set _ = tags.append(tag) %}
+              {% endif %}
+            {% endfor %}
+          {% endfor %}
+          {{ tags | to_json }}
+
+        # Identificar el tag de este host
+        host_tag: "{{ item.subnet_tag | default('') }}"
+
+        # Ahora .index() buscará el ÍNDICE DEL ELEMENTO (0, 1, 2, 3), NO la posición de un carácter
+        tag_index: "{{ ordered_lan_tags.index(host_tag) if (host_tag != '' and host_tag in ordered_lan_tags) else 0 }}"
+
+        # Base CIDR asegurada
+        base_cidr: "{{ target_subnet if '/' in target_subnet else target_subnet ~ '/16' }}"
+
+        # Calcular /24 con el índice correcto (0, 1, 2, 3)
+        derived_subnet: "{{ base_cidr | ansible.utils.ipsubnet(24, tag_index | int) }}"
+
+        # Subred
+        final_subnet: "{{ vlan_info.subnet | default(derived_subnet if host_tag != '' else base_cidr) }}"
+
+        host_ip: "{{ final_subnet | ansible.utils.ipaddr(item.host_number | default(10)) | ansible.utils.ipaddr('address') }}"
+        host_netmask: "{{ final_subnet | ansible.utils.ipaddr('netmask') }}"
+        raw_gateway: "{{ vlan_info.gateway | default(final_subnet | ansible.utils.ipaddr('1')) }}"
+        host_gateway: "{{ raw_gateway | ansible.utils.ipaddr('address') if (raw_gateway and (raw_gateway | ansible.utils.ipaddr)) else raw_gateway }}"
+      loop: "{{ lab_design.nodes }}"
+      when: item.type is defined and item.type == 'docker'
+
+    - name: Encender todos los nodos de la topología
+      uri:
+        url: "{{ gns3_url }}/v2/projects/{{ project_id }}/nodes/start"
+        method: POST
+        status_code: [200, 204]
+
+    - name: Esperar apertura de puertos Telnet de los Routers
+      ansible.builtin.wait_for:
+        host: "{{ gns3_host }}"
+        port: "{{ item.console }}"
+        delay: 5
+        timeout: 45
+      loop: "{{ final_nodes.json }}"
+      when: 
+        - item.node_type == 'dynamips'
+        - item.console is defined
+        - item.name in (lab_design.nodes | selectattr('type', 'defined') | selectattr('type', 'equalto', 'cisco') | map(attribute='name') | list)
+
+    - name: Pausa de estabilización para el booteo completo de Cisco IOS
+      ansible.builtin.pause:
+        seconds: 25
+
+    - name: Inyectar configuracion completa a Routers Cisco IOS via Telnet
+      ansible.builtin.command: >
+        python3 /root/ansible/topologies/scripts/bootstrap_router.py
+        {{ gns3_host }}
+        {{ (final_nodes.json | selectattr('name', 'equalto', item.name) | map(attribute='console') | first) }}
+        '{{ item | to_json }}'
+        {{ routing_protocol }}
+        {{ ospf_area }}
+        {{ target_subnet }}
+        '{{ lab_design | to_json }}'
+      loop: "{{ lab_design.nodes }}"
+      when: 
+        - item.type is defined
+        - item.type == 'cisco'
