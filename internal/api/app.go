@@ -23,6 +23,7 @@ type App struct {
 	Redis      *redis.Client
 	Sesiones   *sesiones.Store
 	Usuarios   *repositorio.UsuarioRepo
+	Grupos     *repositorio.GrupoRepo
 	Limitador  *seguridad.Limitador
 	Importador *importar.Importador
 	Version    string
@@ -41,6 +42,7 @@ func NuevaApp(cfg *config.Config, db *sql.DB, rdb *redis.Client, version string)
 		Redis:      rdb,
 		Sesiones:   ses,
 		Usuarios:   &repositorio.UsuarioRepo{DB: db, AdminClave: cfg.AdminClave},
+		Grupos:     &repositorio.GrupoRepo{DB: db},
 		Limitador:  seguridad.NuevoLimitador(5, 15*time.Minute),
 		Importador: imp,
 		Version:    version,
@@ -71,6 +73,16 @@ func (a *App) Rutas() http.Handler {
 	mux.Handle("GET /api/admin/usuarios/resumen", a.ConRol(a.ResumenUsuarios, "ADMIN"))
 	mux.Handle("PUT /api/admin/usuarios/editar", a.ConRol(a.EditarUsuario, "ADMIN"))
 	mux.Handle("PUT /api/admin/usuarios/password", a.ConRol(a.ResetPassword, "ADMIN"))
+
+	// Grupos: ADMIN ve todos, PROFESOR solo los suyos
+	mux.Handle("GET /api/grupos", a.ConRol(a.ListarGrupos, "ADMIN", "PROFESOR"))
+	mux.Handle("GET /api/grupos/{codigo}/alumnos", a.ConRol(a.AlumnosDeGrupo, "ADMIN", "PROFESOR"))
+
+	// Solo ADMIN: administrar grupos
+	mux.Handle("GET /api/admin/maestros", a.ConRol(a.MaestrosDisponibles, "ADMIN"))
+	mux.Handle("POST /api/admin/grupos", a.ConRol(a.CrearGrupo, "ADMIN"))
+	mux.Handle("DELETE /api/admin/grupos/{codigo}", a.ConRol(a.EliminarGrupo, "ADMIN"))
+	mux.Handle("PUT /api/admin/grupos/{codigo}/docentes", a.ConRol(a.AsignarDocentes, "ADMIN"))
 
 	// API que aún no existe -> 404 JSON
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
