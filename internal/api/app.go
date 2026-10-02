@@ -62,6 +62,12 @@ func (a *App) Rutas() http.Handler {
 	mux.Handle("GET /api/admin/importar/{id}", a.ConRol(a.EstadoImportacion, "ADMIN"))
 	mux.Handle("GET /api/admin/importar/plantilla/{tipo}", a.ConRol(a.PlantillaImportacion, "ADMIN"))
 
+	// Solo ADMIN: usuarios
+	mux.Handle("GET /api/admin/usuarios", a.ConRol(a.ListarUsuarios, "ADMIN"))
+	mux.Handle("GET /api/admin/usuarios/resumen", a.ConRol(a.ResumenUsuarios, "ADMIN"))
+	mux.Handle("PUT /api/admin/usuarios/editar", a.ConRol(a.EditarUsuario, "ADMIN"))
+	mux.Handle("PUT /api/admin/usuarios/password", a.ConRol(a.ResetPassword, "ADMIN"))
+
 	// API que aún no existe -> 404 JSON
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		responderError(w, http.StatusNotFound, "Ruta de API no encontrada")

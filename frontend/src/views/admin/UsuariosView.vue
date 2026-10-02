@@ -11,7 +11,7 @@
     <v-col v-for="k in kpis" :key="k.titulo" cols="6" md="3">
       <v-card class="pa-4">
         <div class="text-caption">{{ k.titulo }}</div>
-        <div class="text-h5 font-weight-bold" :class="`text-${k.color}`">{{ k.valor }}</div>
+        <div class="text-h5 font-weight-bold" :class="`text-${k.color}`">{{ k.valor.toLocaleString('es-MX') }}</div>
       </v-card>
     </v-col>
   </v-row>
@@ -33,12 +33,19 @@
         </v-col>
       </v-row>
 
-      <v-data-table
+      <!-- Paginación en el servidor: solo se descargan los usuarios de la página -->
+      <v-data-table-server
+        v-model:page="pagina"
+        v-model:items-per-page="porPagina"
+        v-model:sort-by="orden"
         :headers="headers"
-        :items="filtrados"
+        :items="usuarios"
+        :items-length="total"
         :loading="cargando"
+        :items-per-page-options="[10, 25, 50, 100]"
         item-value="matricula"
         no-data-text="Sin usuarios. Importa un archivo para empezar."
+        @update:options="cargar"
       >
         <template #item.matricula="{ item }"><span class="font-mono">{{ item.matricula }}</span></template>
         <template #item.tipo="{ item }">
@@ -55,7 +62,7 @@
           <v-btn icon="mdi-shield-edit" variant="text" size="small" title="Editar roles" @click="abrirRoles(item)" />
           <v-btn icon="mdi-key-variant" variant="text" size="small" color="warning" title="Restablecer contraseña" @click="abrirPassword(item)" />
         </template>
-      </v-data-table>
+      </v-data-table-server>
     </v-card-text>
   </v-card>
 
@@ -64,7 +71,7 @@
     <v-card>
       <v-card-item>
         <v-card-title>Roles de {{ dlg.usuario?.nombre }}</v-card-title>
-        <v-card-subtitle class="font-mono">{{ dlg.usuario?.matricula }} · {{ ETIQUETA_TIPO[dlg.usuario?.tipo] }}</v-card-subtitle>
+        <v-card-subtitle class="font-mono">{{ dlg.usuario?.matricula }} · {{ ETIQUETA_TIPO[dlg.usuario?.tipo ?? ''] }}</v-card-subtitle>
       </v-card-item>
 
       <v-card-text>
@@ -88,6 +95,8 @@
 
         <v-alert v-if="esYo" type="info" variant="tonal" density="compact" class="mt-2"
           text="No puedes quitarte el rol de Admin ni desactivar tu propia cuenta." />
+        <v-alert v-else type="warning" variant="tonal" density="compact" class="mt-2"
+          text="Al guardar se cierran las sesiones abiertas de este usuario." />
 
         <div class="text-caption text-medium-emphasis mt-3">
           Podrá entrar como: <b>{{ rolesResultantes.map(etiquetaRol).join(', ') }}</b>
@@ -130,7 +139,7 @@
         </v-form>
 
         <v-alert type="info" variant="tonal" density="compact"
-          text="La contraseña anterior deja de funcionar al instante. Compártela con el usuario por un medio seguro." />
+          text="La contraseña anterior deja de funcionar al instante y se cierran sus sesiones. Compártela con el usuario por un medio seguro." />
       </v-card-text>
 
       <v-card-actions>
@@ -143,17 +152,37 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
+import type { VForm } from 'vuetify/components'
 import { usuariosApi } from '@/api/usuarios'
 import { mensajeError } from '@/api/http'
 import { useAuth } from '@/stores/auth'
 import { useNotificaciones } from '@/stores/notificaciones'
 import { etiquetaRol, colorRol, normalizarRoles } from '@/utils/roles'
 
+type Tipo = 'alumnos' | 'maestros' | 'admins'
+
+interface Usuario {
+  matricula: string
+  nombre: string
+  tipo: Tipo
+  grupo: string | null
+  roles: string[]
+  activo: boolean
+}
+
+interface Resumen {
+  usuarios: number
+  profesores: number
+  admins: number
+  inactivos: number
+  grupos: string[]
+}
+
 const auth = useAuth()
 const noti = useNotificaciones()
 
-const ETIQUETA_TIPO = { alumnos: 'Alumno', maestros: 'Maestro', admins: 'Admin' }
+const ETIQUETA_TIPO: Record<string, string> = { alumnos: 'Alumno', maestros: 'Maestro', admins: 'Admin' }
 const TIPOS = [
   { title: 'Todos', value: 'TODOS' },
   { title: 'Alumnos', value: 'alumnos' },
@@ -172,56 +201,50 @@ const headers = [
   { title: 'Tipo', key: 'tipo' },
   { title: 'Grupo', key: 'grupo' },
   { title: 'Roles', key: 'roles', sortable: false },
-  { title: 'Activo', key: 'activo', align: 'center' },
-  { title: '', key: 'acciones', sortable: false, align: 'end' }
+  { title: 'Activo', key: 'activo', align: 'center' as const },
+  { title: '', key: 'acciones', sortable: false, align: 'end' as const }
 ]
 
-const usuarios = ref([])
+// ---- Tabla (paginada en el servidor) ----
+const usuarios = ref<Usuario[]>([])
+const total = ref(0)
+const pagina = ref(1)
+const porPagina = ref(10)
+const orden = ref<{ key: string; order?: 'asc' | 'desc' | boolean }[]>([])
 const cargando = ref(false)
 const guardando = ref(false)
+
 const busqueda = ref('')
 const filtroTipo = ref('TODOS')
 const filtroRol = ref('TODOS')
 const filtroGrupo = ref('TODOS')
-const formPassRef = ref(null)
 
-const dlg = reactive({ show: false, usuario: null, profesor: false, admin: false, activo: true })
-const dlgPass = reactive({ show: false, usuario: null, nueva: '', ver: true })
-
-const req = (v) => !!v || 'Campo obligatorio'
-const min8 = (v) => (v && v.length >= 8) || 'Mínimo 8 caracteres'
-
-const grupos = computed(() => [...new Set(usuarios.value.map((u) => u.grupo).filter(Boolean))].sort())
+const resumen = ref<Resumen>({ usuarios: 0, profesores: 0, admins: 0, inactivos: 0, grupos: [] })
+const grupos = computed(() => resumen.value.grupos)
 
 const kpis = computed(() => [
-  { titulo: 'Usuarios', valor: usuarios.value.length, color: 'primary' },
-  { titulo: 'Con rol Maestro', valor: usuarios.value.filter((u) => u.roles.includes('PROFESOR')).length, color: 'secondary' },
-  { titulo: 'Con rol Admin', valor: usuarios.value.filter((u) => u.roles.includes('ADMIN')).length, color: 'error' },
-  { titulo: 'Inactivos', valor: usuarios.value.filter((u) => !u.activo).length, color: 'warning' }
+  { titulo: 'Usuarios', valor: resumen.value.usuarios, color: 'primary' },
+  { titulo: 'Con rol Maestro', valor: resumen.value.profesores, color: 'secondary' },
+  { titulo: 'Con rol Admin', valor: resumen.value.admins, color: 'error' },
+  { titulo: 'Inactivos', valor: resumen.value.inactivos, color: 'warning' }
 ])
-
-const filtrados = computed(() => {
-  const q = (busqueda.value || '').trim().toLowerCase()
-  return usuarios.value.filter((u) =>
-    (filtroTipo.value === 'TODOS' || u.tipo === filtroTipo.value) &&
-    (filtroRol.value === 'TODOS' || u.roles.includes(filtroRol.value)) &&
-    (filtroGrupo.value === 'TODOS' || u.grupo === filtroGrupo.value) &&
-    (!q || u.nombre?.toLowerCase().includes(q) || u.matricula?.toLowerCase().includes(q))
-  )
-})
-
-const esYo = computed(() =>
-  dlg.usuario?.matricula?.toUpperCase() === auth.usuario?.matricula?.toUpperCase()
-)
-
-const rolesResultantes = computed(() =>
-  normalizarRoles([...(dlg.admin ? ['ADMIN'] : []), ...(dlg.profesor ? ['PROFESOR'] : [])])
-)
 
 const cargar = async () => {
   cargando.value = true
   try {
-    usuarios.value = await usuariosApi.listar()
+    const o = orden.value[0]
+    const datos = await usuariosApi.listar({
+      pagina: pagina.value,
+      por_pagina: porPagina.value,
+      q: busqueda.value?.trim() || undefined,
+      tipo: filtroTipo.value === 'TODOS' ? undefined : filtroTipo.value,
+      rol: filtroRol.value === 'TODOS' ? undefined : filtroRol.value,
+      grupo: filtroGrupo.value === 'TODOS' ? undefined : filtroGrupo.value,
+      orden: o?.key,
+      desc: o?.order === 'desc' ? true : undefined
+    })
+    usuarios.value = datos.items
+    total.value = datos.total
   } catch (e) {
     noti.error(mensajeError(e, 'No se pudieron cargar los usuarios'))
   } finally {
@@ -229,8 +252,42 @@ const cargar = async () => {
   }
 }
 
-// ----- Roles -----
-const abrirRoles = (u) => {
+const cargarResumen = async () => {
+  try {
+    resumen.value = await usuariosApi.resumen()
+  } catch (e) {
+    noti.error(mensajeError(e, 'No se pudo cargar el resumen'))
+  }
+}
+
+// Al cambiar un filtro se vuelve a la página 1 (la búsqueda espera a que dejes de escribir)
+let espera: ReturnType<typeof setTimeout> | null = null
+const recargarDesdeInicio = () => {
+  if (pagina.value !== 1) pagina.value = 1 // dispara @update:options
+  else cargar()
+}
+watch([filtroTipo, filtroRol, filtroGrupo], recargarDesdeInicio)
+watch(busqueda, () => {
+  if (espera) clearTimeout(espera)
+  espera = setTimeout(recargarDesdeInicio, 400)
+})
+
+onMounted(cargarResumen) // la tabla se carga sola con @update:options
+
+// ---- Roles ----
+const dlg = reactive<{ show: boolean; usuario: Usuario | null; profesor: boolean; admin: boolean; activo: boolean }>({
+  show: false, usuario: null, profesor: false, admin: false, activo: true
+})
+
+const esYo = computed(() =>
+  dlg.usuario?.matricula?.toLowerCase() === auth.usuario?.matricula?.toLowerCase()
+)
+
+const rolesResultantes = computed<string[]>(() =>
+  normalizarRoles([...(dlg.admin ? ['ADMIN'] : []), ...(dlg.profesor ? ['PROFESOR'] : [])])
+)
+
+const abrirRoles = (u: Usuario) => {
   Object.assign(dlg, {
     show: true,
     usuario: u,
@@ -241,6 +298,7 @@ const abrirRoles = (u) => {
 }
 
 const guardarRoles = async () => {
+  if (!dlg.usuario) return
   guardando.value = true
   try {
     await usuariosApi.actualizar({
@@ -251,6 +309,7 @@ const guardarRoles = async () => {
     noti.exito('Roles actualizados')
     dlg.show = false
     cargar()
+    cargarResumen()
   } catch (e) {
     noti.error(mensajeError(e, 'No se pudieron guardar los roles'))
   } finally {
@@ -258,7 +317,15 @@ const guardarRoles = async () => {
   }
 }
 
-// ----- Contraseña -----
+// ---- Contraseña ----
+const formPassRef = ref<InstanceType<typeof VForm> | null>(null)
+const dlgPass = reactive<{ show: boolean; usuario: Usuario | null; nueva: string; ver: boolean }>({
+  show: false, usuario: null, nueva: '', ver: true
+})
+
+const req = (v: string) => !!v || 'Campo obligatorio'
+const min8 = (v: string) => (v && v.length >= 8) || 'Mínimo 8 caracteres'
+
 const generar = () => {
   // Sin caracteres confusos (0/O, 1/l/I)
   const c = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
@@ -272,6 +339,7 @@ const copiar = async () => {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(dlgPass.nueva)
     } else {
+      // En http (sin https) el portapapeles moderno no existe
       const ta = document.createElement('textarea')
       ta.value = dlgPass.nueva
       ta.style.position = 'fixed'
@@ -287,13 +355,13 @@ const copiar = async () => {
   }
 }
 
-const abrirPassword = (u) => {
+const abrirPassword = (u: Usuario) => {
   Object.assign(dlgPass, { show: true, usuario: u, nueva: '', ver: true })
 }
 
 const guardarPassword = async () => {
-  const { valid } = await formPassRef.value.validate()
-  if (!valid) return
+  const resultado = await formPassRef.value?.validate()
+  if (!resultado?.valid || !dlgPass.usuario) return
   guardando.value = true
   try {
     await usuariosApi.resetPassword(dlgPass.usuario.matricula, dlgPass.nueva)
@@ -305,6 +373,4 @@ const guardarPassword = async () => {
     guardando.value = false
   }
 }
-
-onMounted(cargar)
 </script>

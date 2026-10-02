@@ -1,30 +1,35 @@
 import http from './http'
-import { mockListarUsuarios, mockActualizarUsuario } from './mock'
-import { mockResetPassword } from './mockAdmin'
-import { useAuth } from '@/stores/auth'
 
-const MOCK = import.meta.env.VITE_MOCK === 'true'
-
+/*
+ * Usuarios: TODO es real (Firebird). Ya no usa mock.
+ */
 export const usuariosApi = {
-  async listar() {
-    if (MOCK) return mockListarUsuarios()
-    return (await http.get('/admin/usuarios')).data
+  /**
+   * Página de usuarios (la pagina Firebird).
+   * params = { pagina, por_pagina, q, tipo, rol, grupo, orden, desc }
+   * -> { items: [...], total }
+   */
+  async listar(params = {}) {
+    return (await http.get('/admin/usuarios', { params })).data
+  },
+
+  /** -> { usuarios, profesores, admins, inactivos, grupos: [] } */
+  async resumen() {
+    return (await http.get('/admin/usuarios/resumen')).data
   },
 
   /** cambios = { matricula, roles: ['ADMIN','PROFESOR','ALUMNO'], activo } */
   async actualizar(cambios) {
-    if (MOCK) return mockActualizarUsuario(useAuth().usuario.matricula, cambios)
     return (await http.put('/admin/usuarios/editar', cambios)).data
   },
 
   /** El admin pone una contraseña nueva sin conocer la anterior */
   async resetPassword(matricula, nueva) {
-    if (MOCK) return mockResetPassword(matricula, nueva)
-    return (await http.put('/admin/usuarios/password', { matricula, nueva_password: nueva })).data
+    await http.put('/admin/usuarios/password', { matricula, nueva_password: nueva })
   },
 
   /**
-   * Importación masiva (SIEMPRE real: el backend ya existe).
+   * Importación masiva.
    * tipo:     'alumnos' | 'maestros' | 'admins'
    * onSubida: callback con el % de subida (0-100)
    * Responde de inmediato con el trabajo { id, estado: 'procesando', ... }
