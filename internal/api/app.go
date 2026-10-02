@@ -4,9 +4,11 @@ package api
 import (
 	"database/sql"
 	"net/http"
+	"os"
 	"time"
 
 	"raccoon_lab/internal/config"
+	"raccoon_lab/internal/importar"
 	"raccoon_lab/internal/repositorio"
 	"raccoon_lab/internal/seguridad"
 	"raccoon_lab/internal/sesiones"
@@ -16,26 +18,29 @@ import (
 
 // App agrupa TODAS las dependencias. Se crea una sola vez y se comparte por puntero.
 type App struct {
-	Cfg       *config.Config
-	DB        *sql.DB
-	Redis     *redis.Client
-	Sesiones  *sesiones.Store
-	Usuarios  *repositorio.UsuarioRepo
-	Limitador *seguridad.Limitador
-	Version   string
-	Inicio    time.Time
+	Cfg        *config.Config
+	DB         *sql.DB
+	Redis      *redis.Client
+	Sesiones   *sesiones.Store
+	Usuarios   *repositorio.UsuarioRepo
+	Limitador  *seguridad.Limitador
+	Importador *importar.Importador
+	Version    string
+	Inicio     time.Time
 }
 
 func NuevaApp(cfg *config.Config, db *sql.DB, rdb *redis.Client, version string) *App {
+	ses := &sesiones.Store{R: rdb, Duracion: cfg.DuracionSesion}
 	return &App{
-		Cfg:       cfg,
-		DB:        db,
-		Redis:     rdb,
-		Sesiones:  &sesiones.Store{R: rdb, Duracion: cfg.DuracionSesion},
-		Usuarios:  &repositorio.UsuarioRepo{DB: db},
-		Limitador: seguridad.NuevoLimitador(5, 15*time.Minute),
-		Version:   version,
-		Inicio:    time.Now(),
+		Cfg:        cfg,
+		DB:         db,
+		Redis:      rdb,
+		Sesiones:   ses,
+		Usuarios:   &repositorio.UsuarioRepo{DB: db},
+		Limitador:  seguridad.NuevoLimitador(5, 15*time.Minute),
+		Importador: importar.Nuevo(db, ses.EliminarTodas, os.TempDir()),
+		Version:    version,
+		Inicio:     time.Now(),
 	}
 }
 
@@ -51,6 +56,11 @@ func (a *App) Rutas() http.Handler {
 
 	// Con sesión (cualquier rol)
 	mux.Handle("POST /api/auth/cambiar-rol", a.ConSesion(a.CambiarRol))
+
+	// Solo ADMIN: importación masiva de usuarios
+	mux.Handle("POST /api/admin/importar/{tipo}", a.ConRol(a.SubirImportacion, "ADMIN"))
+	mux.Handle("GET /api/admin/importar/{id}", a.ConRol(a.EstadoImportacion, "ADMIN"))
+	mux.Handle("GET /api/admin/importar/plantilla/{tipo}", a.ConRol(a.PlantillaImportacion, "ADMIN"))
 
 	// API que aún no existe -> 404 JSON
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
