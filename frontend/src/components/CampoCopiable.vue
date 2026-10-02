@@ -14,7 +14,7 @@
   </v-text-field>
 </template>
 
-<script setup>
+<script lang="ts" setup>
 import { ref } from 'vue'
 import { useNotificaciones } from '@/stores/notificaciones'
 

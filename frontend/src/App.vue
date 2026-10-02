@@ -5,6 +5,6 @@
   </v-app>
 </template>
 
-<script setup>
+<script lang="ts" setup>
 import AppNotificaciones from '@/components/AppNotificaciones.vue'
 </script>

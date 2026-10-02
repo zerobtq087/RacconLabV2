@@ -11,7 +11,7 @@
   </v-tooltip>
 </template>
 
-<script setup>
+<script lang="ts" setup>
 import { computed } from 'vue'
 import { useTheme } from 'vuetify'
 

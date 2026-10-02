@@ -94,7 +94,7 @@
   </v-row>
 </template>
 
-<script setup>
+<script lang="ts" setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { perfilApi } from '@/api/perfil'
 import { mensajeError } from '@/api/http'

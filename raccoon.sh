@@ -152,7 +152,7 @@ GNS3_VOLUMES=$RAIZ/gns3/volumes
 JWT_SECRET=$(aleatorio 64)
 
 # Admin inicial (se crea solo en el primer arranque)
-ADMIN_CLAVE=ADMIN
+ADMIN_CLAVE=admin
 ADMIN_PASSWORD=$(aleatorio 16)
 
 # ===== Firebird 5 (db-engine) =====
@@ -253,7 +253,7 @@ if curl -fsS "http://127.0.0.1:$PUERTO/api/salud" >/dev/null 2>&1; then
 else
   echo "  La app no respondió. Revisa:  podman logs ${PREFIJO}-app"
 fi
-echo "  Admin inicial: ADMIN / $(grep '^ADMIN_PASSWORD=' "$RAIZ/.env" | cut -d= -f2)"
+echo "  Admin inicial: admin / $(grep '^ADMIN_PASSWORD=' "$RAIZ/.env" | cut -d= -f2)"
 podman ps --format "  {{.Names}}  ->  {{.Status}}"
 echo "================================================================"
 if [ "$DOCKER" = "sudo docker" ]; then

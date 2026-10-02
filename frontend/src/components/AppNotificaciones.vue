@@ -7,7 +7,7 @@
   </v-snackbar>
 </template>
 
-<script setup>
+<script lang="ts" setup>
 import { useNotificaciones } from '@/stores/notificaciones'
 const noti = useNotificaciones()
 </script>

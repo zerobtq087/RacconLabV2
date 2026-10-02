@@ -41,9 +41,12 @@
         />
 
         <!-- Bloqueo con cuenta regresiva en tiempo real -->
-        <v-alert v-if="bloqueada" type="warning" variant="tonal" density="compact" class="mb-4" icon="mdi-lock-clock">
-          Cuenta bloqueada por intentos fallidos.<br />
-          Podrás intentar de nuevo en <strong class="text-h6">{{ tiempoRestante }}</strong>
+        <v-alert v-if="bloqueada" type="warning" variant="tonal" class="mb-4" icon="mdi-lock-clock">
+          <div>Cuenta bloqueada por intentos fallidos.</div>
+          <div class="d-flex align-center mt-1">
+            <span class="mr-2">Podrás intentar de nuevo en</span>
+            <span class="text-h5 font-weight-bold reloj">{{ tiempoRestante }}</span>
+          </div>
         </v-alert>
 
         <v-alert v-else-if="error" type="error" variant="tonal" density="compact" class="mb-4" :text="error" />
@@ -73,8 +76,14 @@ import { ROLES_UI } from '@/utils/roles'
 type Rol = 'ALUMNO' | 'PROFESOR' | 'ADMIN'
 
 interface ErrorApi {
-  response?: { status?: number; data?: { message?: string; bloqueo_s?: number } }
+  response?: {
+    status?: number
+    headers?: Record<string, string>
+    data?: { message?: string; bloqueo_s?: number }
+  }
 }
+
+const BLOQUEO_POR_DEFECTO = 15 * 60
 
 const auth = useAuth()
 const route = useRoute()
@@ -97,7 +106,7 @@ const matriculaBloqueada = ref('')
 const segundos = ref(0)
 let reloj: ReturnType<typeof setInterval> | null = null
 
-const normalizar = (m: string) => m.trim().toUpperCase()
+const normalizar = (m: string) => m.trim().toLowerCase()
 
 // El bloqueo es por matrícula: si escribe otra, puede intentar
 const bloqueada = computed(
@@ -107,7 +116,7 @@ const bloqueada = computed(
 const tiempoRestante = computed(() => {
   const m = Math.floor(segundos.value / 60)
   const s = segundos.value % 60
-  return `${m}:${String(s).padStart(2, '0')}`
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 })
 
 const detenerReloj = () => {
@@ -133,6 +142,15 @@ const iniciarBloqueo = (matricula: string, seg: number) => {
 
 onBeforeUnmount(detenerReloj)
 
+// Segundos de bloqueo: del JSON, del header Retry-After o 15 min
+const segundosDeBloqueo = (err: ErrorApi): number => {
+  const delJson = Number(err.response?.data?.bloqueo_s)
+  if (delJson > 0) return delJson
+  const delHeader = Number(err.response?.headers?.['retry-after'])
+  if (delHeader > 0) return delHeader
+  return BLOQUEO_POR_DEFECTO
+}
+
 const entrar = async () => {
   const resultado = await formRef.value?.validate()
   if (!resultado?.valid || bloqueada.value) return
@@ -144,9 +162,8 @@ const entrar = async () => {
     router.replace((route.query.redirect as string) || { name: 'laboratorio' })
   } catch (e) {
     const err = e as ErrorApi
-    const seg = err.response?.data?.bloqueo_s
-    if (err.response?.status === 429 && seg) {
-      iniciarBloqueo(form.matricula, seg)
+    if (err.response?.status === 429) {
+      iniciarBloqueo(form.matricula, segundosDeBloqueo(err))
       form.password = ''
     } else {
       error.value = mensajeError(e, 'Matrícula o contraseña incorrectas')
@@ -169,5 +186,8 @@ const entrar = async () => {
   top: 12px;
   right: 12px;
   z-index: 10;
+}
+.reloj {
+  font-variant-numeric: tabular-nums;
 }
 </style>

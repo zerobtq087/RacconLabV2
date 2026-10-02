@@ -18,7 +18,7 @@ type UsuarioRepo struct {
 // BuscarPorMatricula devuelve (nil, nil) si no existe.
 // Regresa un puntero: el usuario se crea una vez y se pasa sin copiarlo.
 func (r *UsuarioRepo) BuscarPorMatricula(ctx context.Context, matricula string) (*modelos.Usuario, error) {
-	matricula = strings.ToUpper(strings.TrimSpace(matricula))
+	matricula = strings.ToLower(strings.TrimSpace(matricula))
 
 	u := &modelos.Usuario{}
 	var grupo sql.NullString

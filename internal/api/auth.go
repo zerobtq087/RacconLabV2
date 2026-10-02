@@ -57,7 +57,7 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 		responderError(w, http.StatusBadRequest, "Solicitud inválida")
 		return
 	}
-	matricula := strings.ToUpper(strings.TrimSpace(req.Matricula))
+	matricula := strings.ToLower(strings.TrimSpace(req.Matricula))
 	rol := strings.ToUpper(strings.TrimSpace(req.Rol))
 	if matricula == "" || req.Password == "" || rol == "" {
 		responderError(w, http.StatusBadRequest, "Matrícula, contraseña y rol son obligatorios")

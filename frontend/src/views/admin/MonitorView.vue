@@ -64,7 +64,7 @@
   </v-dialog>
 </template>
 
-<script setup>
+<script lang="ts" setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { monitorApi } from '@/api/monitor'
 import { mensajeError } from '@/api/http'

@@ -140,7 +140,7 @@
   </v-stepper>
 </template>
 
-<script setup>
+<script lang="ts" setup>
 import { ref, computed, watch } from 'vue'
 import { usuariosApi } from '@/api/usuarios'
 import { mensajeError } from '@/api/http'

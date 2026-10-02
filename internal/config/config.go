@@ -58,7 +58,7 @@ func Cargar() (*Config, error) {
 		JWTSecret:      env("JWT_SECRET", ""),
 		DuracionSesion: 8 * time.Hour,
 
-		AdminClave:    strings.ToUpper(env("ADMIN_CLAVE", "ADMIN")),
+		AdminClave:    strings.ToLower(env("ADMIN_CLAVE", "admin")),
 		AdminPassword: env("ADMIN_PASSWORD", ""),
 
 		DB: BaseDatos{

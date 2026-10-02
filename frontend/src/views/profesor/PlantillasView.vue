@@ -121,7 +121,7 @@
   </v-row>
 </template>
 
-<script setup>
+<script lang="ts" setup>
 import { ref, reactive, computed } from 'vue'
 import EstadoWorkspace from '@/components/EstadoWorkspace.vue'
 import { plantillasApi } from '@/api/plantillas'

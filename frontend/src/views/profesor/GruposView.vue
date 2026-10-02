@@ -157,7 +157,7 @@
   </v-dialog>
 </template>
 
-<script setup>
+<script lang="ts" setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { gruposApi } from '@/api/grupos'
 import { mensajeError } from '@/api/http'

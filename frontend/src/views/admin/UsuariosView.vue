@@ -142,7 +142,7 @@
   </v-dialog>
 </template>
 
-<script setup>
+<script lang="ts" setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { usuariosApi } from '@/api/usuarios'
 import { mensajeError } from '@/api/http'

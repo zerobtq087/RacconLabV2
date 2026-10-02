@@ -66,7 +66,7 @@
   </v-main>
 </template>
 
-<script setup>
+<script lang="ts" setup>
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
