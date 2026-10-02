@@ -1,5 +1,5 @@
 import http from './http'
-import { mockImportar, mockListarUsuarios, mockActualizarUsuario } from './mock'
+import { mockListarUsuarios, mockActualizarUsuario } from './mock'
 import { mockResetPassword } from './mockAdmin'
 import { useAuth } from '@/stores/auth'
 
@@ -24,19 +24,26 @@ export const usuariosApi = {
   },
 
   /**
-   * tipo:   'alumnos' | 'maestros' | 'admins'
-   * dryRun: true = solo valida; false = guarda
+   * Importación masiva (SIEMPRE real: el backend ya existe).
+   * tipo:     'alumnos' | 'maestros' | 'admins'
+   * onSubida: callback con el % de subida (0-100)
+   * Responde de inmediato con el trabajo { id, estado: 'procesando', ... }
    */
-  async importar(archivo, tipo, dryRun = true) {
-    if (MOCK) return mockImportar(archivo, tipo, dryRun)
-
+  async importar(archivo, tipo, onSubida) {
     const fd = new FormData()
     fd.append('archivo', archivo)
-    const { data } = await http.post('/admin/usuarios/importar', fd, {
-      params: { tipo, dry_run: dryRun },
+    const { data } = await http.post(`/admin/importar/${tipo}`, fd, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 120000
+      timeout: 0, // 100 MB pueden tardar en subir
+      onUploadProgress: (e) => {
+        if (onSubida && e.total) onSubida(Math.round((e.loaded * 100) / e.total))
+      }
     })
     return data
+  },
+
+  /** Avance en vivo de una importación */
+  async estadoImportacion(id) {
+    return (await http.get(`/admin/importar/${id}`)).data
   }
 }
