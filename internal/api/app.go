@@ -31,14 +31,18 @@ type App struct {
 
 func NuevaApp(cfg *config.Config, db *sql.DB, rdb *redis.Client, version string) *App {
 	ses := &sesiones.Store{R: rdb, Duracion: cfg.DuracionSesion}
+
+	imp := importar.Nuevo(db, ses.EliminarTodas, os.TempDir())
+	imp.Protegida = cfg.AdminClave
+
 	return &App{
 		Cfg:        cfg,
 		DB:         db,
 		Redis:      rdb,
 		Sesiones:   ses,
-		Usuarios:   &repositorio.UsuarioRepo{DB: db},
+		Usuarios:   &repositorio.UsuarioRepo{DB: db, AdminClave: cfg.AdminClave},
 		Limitador:  seguridad.NuevoLimitador(5, 15*time.Minute),
-		Importador: importar.Nuevo(db, ses.EliminarTodas, os.TempDir()),
+		Importador: imp,
 		Version:    version,
 		Inicio:     time.Now(),
 	}

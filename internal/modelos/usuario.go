@@ -12,7 +12,8 @@ type Usuario struct {
 	Grupo        *string  `json:"grupo"`
 	Activo       bool     `json:"activo"`
 	Roles        []string `json:"roles"`
-	PasswordHash string   `json:"-"` // nunca sale en el JSON
+	Protegido    bool     `json:"protegido"` // admin general: nadie lo puede modificar
+	PasswordHash string   `json:"-"`         // nunca sale en el JSON
 }
 
 // TieneRol usa receptor puntero: no copia el usuario (ni su slice de roles)

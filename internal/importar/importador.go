@@ -114,6 +114,7 @@ type Importador struct {
 	DB             *sql.DB
 	CerrarSesiones CerrarSesiones
 	Dir            string // carpeta temporal donde se guarda el archivo subido
+	Protegida      string // clave del admin general: la importación nunca la toca
 
 	mu       sync.Mutex
 	trabajos map[string]*Trabajo
@@ -330,6 +331,10 @@ func (im *Importador) leer(ctx context.Context, t *Trabajo, tipo *Tipo, l Lector
 		f, msg := validar(reg, indices, tipo, num)
 		if msg != "" {
 			t.errorFila(num, msg)
+			continue
+		}
+		if f.id == im.Protegida {
+			t.errorFila(num, "es el administrador general: no se modifica por importación")
 			continue
 		}
 		if previa, ok := vistos[f.id]; ok {

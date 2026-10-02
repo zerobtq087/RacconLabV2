@@ -12,7 +12,8 @@ import (
 )
 
 type UsuarioRepo struct {
-	DB *sql.DB
+	DB         *sql.DB
+	AdminClave string // admin general (del .env): protegido contra cambios
 }
 
 // BuscarPorMatricula devuelve (nil, nil) si no existe.
@@ -35,6 +36,7 @@ func (r *UsuarioRepo) BuscarPorMatricula(ctx context.Context, matricula string) 
 	}
 
 	limpiar(u)
+	u.Protegido = u.Matricula == r.AdminClave
 	if grupo.Valid && strings.TrimSpace(grupo.String) != "" {
 		g := strings.TrimSpace(grupo.String)
 		u.Grupo = &g

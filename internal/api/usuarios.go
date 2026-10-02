@@ -79,6 +79,10 @@ func (a *App) EditarUsuario(w http.ResponseWriter, r *http.Request) {
 
 	yo := sesionDe(r)
 	esYo := matricula == yo.Matricula
+	if matricula == a.Cfg.AdminClave {
+		responderError(w, http.StatusForbidden, "El administrador general no se puede modificar")
+		return
+	}
 	if esYo && (!slices.Contains(roles, "ADMIN") || !*req.Activo) {
 		responderError(w, http.StatusBadRequest, "No puedes quitarte el rol de Admin ni desactivar tu propia cuenta")
 		return
@@ -88,6 +92,9 @@ func (a *App) EditarUsuario(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, repositorio.ErrNoEncontrado):
 		responderError(w, http.StatusNotFound, "Usuario no encontrado")
+		return
+	case errors.Is(err, repositorio.ErrProtegido):
+		responderError(w, http.StatusForbidden, "El administrador general no se puede modificar")
 		return
 	case errors.Is(err, repositorio.ErrUltimoAdmin):
 		responderError(w, http.StatusBadRequest, "Debe quedar al menos un admin activo")
@@ -119,6 +126,13 @@ func (a *App) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	matricula := strings.ToLower(strings.TrimSpace(req.Matricula))
+
+	// La contraseña del admin general solo la cambia él mismo
+	if matricula == a.Cfg.AdminClave && sesionDe(r).Matricula != matricula {
+		responderError(w, http.StatusForbidden, "Solo el administrador general puede cambiar su propia contraseña")
+		return
+	}
+
 	switch {
 	case len(req.Nueva) < 8:
 		responderError(w, http.StatusBadRequest, "La contraseña debe tener al menos 8 caracteres")

@@ -107,6 +107,7 @@ func (r *UsuarioRepo) Listar(ctx context.Context, f *FiltroUsuarios) (*PaginaUsu
 			return nil, err
 		}
 		limpiar(u)
+		u.Protegido = u.Matricula == r.AdminClave
 		if grupo.Valid && strings.TrimSpace(grupo.String) != "" {
 			g := strings.TrimSpace(grupo.String)
 			u.Grupo = &g
@@ -203,6 +204,7 @@ func (r *UsuarioRepo) Resumen(ctx context.Context) (*ResumenUsuarios, error) {
 var (
 	ErrNoEncontrado = errors.New("usuario no encontrado")
 	ErrUltimoAdmin  = errors.New("debe quedar al menos un admin activo")
+	ErrProtegido    = errors.New("el administrador general no se puede modificar")
 )
 
 // ActualizarRoles reemplaza los roles (ALUMNO siempre se conserva) y el estado activo
@@ -219,6 +221,9 @@ func (r *UsuarioRepo) ActualizarRoles(ctx context.Context, matricula string, rol
 	}
 	if existe == 0 {
 		return ErrNoEncontrado
+	}
+	if matricula == r.AdminClave {
+		return ErrProtegido
 	}
 
 	// Si le quitan ADMIN o lo desactivan, ¿queda otro admin activo?

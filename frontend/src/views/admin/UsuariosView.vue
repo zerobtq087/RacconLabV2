@@ -58,9 +58,25 @@
         <template #item.activo="{ item }">
           <v-icon :icon="item.activo ? 'mdi-check-circle' : 'mdi-cancel'" :color="item.activo ? 'success' : 'grey'" />
         </template>
+        <template #item.nombre="{ item }">
+          {{ item.nombre }}
+          <v-chip v-if="item.protegido" size="x-small" color="error" variant="outlined" prepend-icon="mdi-lock" class="ml-1">
+            General
+          </v-chip>
+        </template>
         <template #item.acciones="{ item }">
-          <v-btn icon="mdi-shield-edit" variant="text" size="small" title="Editar roles" @click="abrirRoles(item)" />
-          <v-btn icon="mdi-key-variant" variant="text" size="small" color="warning" title="Restablecer contraseña" @click="abrirPassword(item)" />
+          <v-btn
+            icon="mdi-shield-edit" variant="text" size="small"
+            :title="item.protegido ? 'El administrador general no se puede modificar' : 'Editar roles'"
+            :disabled="item.protegido"
+            @click="abrirRoles(item)"
+          />
+          <v-btn
+            icon="mdi-key-variant" variant="text" size="small" color="warning"
+            :title="item.protegido && !soyYo(item) ? 'Solo él puede cambiar su contraseña' : 'Restablecer contraseña'"
+            :disabled="item.protegido && !soyYo(item)"
+            @click="abrirPassword(item)"
+          />
         </template>
       </v-data-table-server>
     </v-card-text>
@@ -169,6 +185,7 @@ interface Usuario {
   grupo: string | null
   roles: string[]
   activo: boolean
+  protegido: boolean // admin general: nadie lo puede modificar
 }
 
 interface Resumen {
@@ -279,9 +296,10 @@ const dlg = reactive<{ show: boolean; usuario: Usuario | null; profesor: boolean
   show: false, usuario: null, profesor: false, admin: false, activo: true
 })
 
-const esYo = computed(() =>
-  dlg.usuario?.matricula?.toLowerCase() === auth.usuario?.matricula?.toLowerCase()
-)
+const soyYo = (u?: Usuario | null) =>
+  !!u && u.matricula.toLowerCase() === auth.usuario?.matricula?.toLowerCase()
+
+const esYo = computed(() => soyYo(dlg.usuario))
 
 const rolesResultantes = computed<string[]>(() =>
   normalizarRoles([...(dlg.admin ? ['ADMIN'] : []), ...(dlg.profesor ? ['PROFESOR'] : [])])
