@@ -40,9 +40,17 @@
           @click:append-inner="verPassword = !verPassword"
         />
 
-        <v-alert v-if="error" type="error" variant="tonal" density="compact" class="mb-4" :text="error" />
+        <!-- Bloqueo con cuenta regresiva en tiempo real -->
+        <v-alert v-if="bloqueada" type="warning" variant="tonal" density="compact" class="mb-4" icon="mdi-lock-clock">
+          Cuenta bloqueada por intentos fallidos.<br />
+          Podrás intentar de nuevo en <strong class="text-h6">{{ tiempoRestante }}</strong>
+        </v-alert>
 
-        <v-btn type="submit" color="primary" size="large" block :loading="cargando">Iniciar sesión</v-btn>
+        <v-alert v-else-if="error" type="error" variant="tonal" density="compact" class="mb-4" :text="error" />
+
+        <v-btn type="submit" color="primary" size="large" block :loading="cargando" :disabled="bloqueada">
+          {{ bloqueada ? 'Bloqueado' : 'Iniciar sesión' }}
+        </v-btn>
       </v-form>
 
       <div class="text-caption text-medium-emphasis text-center mt-6">
@@ -53,37 +61,96 @@
   </v-main>
 </template>
 
-<script setup>
-import { ref, reactive } from 'vue'
+<script lang="ts" setup>
+import { ref, reactive, computed, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import type { VForm } from 'vuetify/components'
 import BotonTema from '@/components/BotonTema.vue'
 import { useAuth } from '@/stores/auth'
 import { mensajeError } from '@/api/http'
 import { ROLES_UI } from '@/utils/roles'
 
+type Rol = 'ALUMNO' | 'PROFESOR' | 'ADMIN'
+
+interface ErrorApi {
+  response?: { status?: number; data?: { message?: string; bloqueo_s?: number } }
+}
+
 const auth = useAuth()
 const route = useRoute()
 const router = useRouter()
 
-const formRef = ref(null)
+const formRef = ref<InstanceType<typeof VForm> | null>(null)
 const verPassword = ref(false)
 const cargando = ref(false)
 const error = ref('')
-const form = reactive({ rol: 'ALUMNO', matricula: '', password: '' })
+const form = reactive<{ rol: Rol; matricula: string; password: string }>({
+  rol: 'ALUMNO',
+  matricula: '',
+  password: ''
+})
 
-const requerido = (v) => !!(v && String(v).trim()) || 'Campo obligatorio'
+const requerido = (v: string) => !!(v && String(v).trim()) || 'Campo obligatorio'
+
+// ---- Bloqueo: matrícula bloqueada + segundos restantes ----
+const matriculaBloqueada = ref('')
+const segundos = ref(0)
+let reloj: ReturnType<typeof setInterval> | null = null
+
+const normalizar = (m: string) => m.trim().toUpperCase()
+
+// El bloqueo es por matrícula: si escribe otra, puede intentar
+const bloqueada = computed(
+  () => segundos.value > 0 && normalizar(form.matricula) === matriculaBloqueada.value
+)
+
+const tiempoRestante = computed(() => {
+  const m = Math.floor(segundos.value / 60)
+  const s = segundos.value % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+})
+
+const detenerReloj = () => {
+  if (reloj) clearInterval(reloj)
+  reloj = null
+}
+
+const iniciarBloqueo = (matricula: string, seg: number) => {
+  detenerReloj()
+  matriculaBloqueada.value = normalizar(matricula)
+  // Se calcula contra la hora de fin: no se desfasa si la pestaña se duerme
+  const fin = Date.now() + seg * 1000
+  segundos.value = seg
+  reloj = setInterval(() => {
+    segundos.value = Math.max(0, Math.ceil((fin - Date.now()) / 1000))
+    if (segundos.value === 0) {
+      detenerReloj()
+      matriculaBloqueada.value = ''
+      error.value = ''
+    }
+  }, 1000)
+}
+
+onBeforeUnmount(detenerReloj)
 
 const entrar = async () => {
-  const { valid } = await formRef.value.validate()
-  if (!valid) return
+  const resultado = await formRef.value?.validate()
+  if (!resultado?.valid || bloqueada.value) return
 
   cargando.value = true
   error.value = ''
   try {
     await auth.login(form.matricula, form.password, form.rol)
-    router.replace(route.query.redirect || { name: 'laboratorio' })
+    router.replace((route.query.redirect as string) || { name: 'laboratorio' })
   } catch (e) {
-    error.value = mensajeError(e, 'Matrícula o contraseña incorrectas')
+    const err = e as ErrorApi
+    const seg = err.response?.data?.bloqueo_s
+    if (err.response?.status === 429 && seg) {
+      iniciarBloqueo(form.matricula, seg)
+      form.password = ''
+    } else {
+      error.value = mensajeError(e, 'Matrícula o contraseña incorrectas')
+    }
   } finally {
     cargando.value = false
   }

@@ -42,8 +42,9 @@ func (l *Limitador) Bloqueado(clave string) (bool, time.Duration) {
 	return false, 0
 }
 
-// Fallo registra un intento fallido; al llegar a MaxFallos bloquea
-func (l *Limitador) Fallo(clave string) {
+// Fallo registra un intento fallido.
+// Regresa cuántos intentos le quedan y, si ya se bloqueó, cuánto dura el bloqueo.
+func (l *Limitador) Fallo(clave string) (restantes int, bloqueo time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	r, ok := l.intentos[clave]
@@ -56,7 +57,9 @@ func (l *Limitador) Fallo(clave string) {
 	if r.fallos >= l.MaxFallos {
 		r.bloqueoHasta = time.Now().Add(l.Bloqueo)
 		r.fallos = 0
+		return 0, l.Bloqueo
 	}
+	return l.MaxFallos - r.fallos, 0
 }
 
 // Exito borra el registro de la matrícula

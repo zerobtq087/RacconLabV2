@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +39,17 @@ func (a *App) ponerCookie(w http.ResponseWriter, id string, duracion time.Durati
 	})
 }
 
+// responderBloqueo manda los segundos exactos para que el frontend
+// muestre la cuenta regresiva en tiempo real
+func responderBloqueo(w http.ResponseWriter, resta time.Duration) {
+	seg := int(resta.Seconds())
+	w.Header().Set("Retry-After", strconv.Itoa(seg))
+	responderJSON(w, http.StatusTooManyRequests, map[string]any{
+		"message":   "Demasiados intentos fallidos. Cuenta bloqueada temporalmente",
+		"bloqueo_s": seg,
+	})
+}
+
 // Login: valida en FIREBIRD, crea la sesión en REDIS
 func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 	var req solicitudLogin
@@ -53,8 +65,7 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if bloqueado, resta := a.Limitador.Bloqueado(matricula); bloqueado {
-		responderError(w, http.StatusTooManyRequests,
-			fmt.Sprintf("Demasiados intentos fallidos. Intenta de nuevo en %s", resta))
+		responderBloqueo(w, resta)
 		return
 	}
 
@@ -67,8 +78,15 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Mismo mensaje si no existe o si la contraseña es incorrecta (no revelar cuál)
 	if u == nil || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.Password)) != nil {
-		a.Limitador.Fallo(matricula)
-		responderError(w, http.StatusUnauthorized, "Matrícula/clave o contraseña incorrectas")
+		restantes, bloqueo := a.Limitador.Fallo(matricula)
+		if bloqueo > 0 {
+			responderBloqueo(w, bloqueo)
+			return
+		}
+		responderJSON(w, http.StatusUnauthorized, map[string]any{
+			"message":            fmt.Sprintf("Matrícula/clave o contraseña incorrectas. Te quedan %d intentos", restantes),
+			"intentos_restantes": restantes,
+		})
 		return
 	}
 	if !u.Activo {
