@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"raccoon_lab/internal/config"
+	"raccoon_lab/internal/docker"
 	"raccoon_lab/internal/importar"
 	"raccoon_lab/internal/repositorio"
 	"raccoon_lab/internal/seguridad"
@@ -26,6 +27,7 @@ type App struct {
 	Grupos     *repositorio.GrupoRepo
 	Limitador  *seguridad.Limitador
 	Importador *importar.Importador
+	Docker     *docker.Cliente
 	Version    string
 	Inicio     time.Time
 }
@@ -45,6 +47,7 @@ func NuevaApp(cfg *config.Config, db *sql.DB, rdb *redis.Client, version string)
 		Grupos:     &repositorio.GrupoRepo{DB: db},
 		Limitador:  seguridad.NuevoLimitador(5, 15*time.Minute),
 		Importador: imp,
+		Docker:     docker.Nuevo(docker.SocketPorDefecto),
 		Version:    version,
 		Inicio:     time.Now(),
 	}

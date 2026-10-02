@@ -79,6 +79,18 @@ if ! grep -q "^$USER:" /etc/subuid 2>/dev/null; then
   podman system migrate || true
 fi
 
+# Runtime crun: permite que la app (Podman sin root) use el socket de Docker
+# conservando el grupo "docker" del usuario (group_add: keep-groups)
+if [ "$DISTRO" = "arch" ]; then
+  sudo pacman -S --needed --noconfirm crun
+else
+  sudo apt-get install -y -qq crun
+fi
+mkdir -p "$HOME/.config/containers"
+if ! grep -qs 'runtime *= *"crun"' "$HOME/.config/containers/containers.conf"; then
+  printf '[engine]\nruntime = "crun"\n' >> "$HOME/.config/containers/containers.conf"
+fi
+
 # Si el grupo docker aún no aplica en esta sesión, usamos sudo para docker
 if docker info &>/dev/null; then DOCKER="docker"; else DOCKER="sudo docker"; fi
 echo "   Docker: $(docker --version | cut -d, -f1) | Podman: $(podman --version)"

@@ -8,6 +8,9 @@ services:
     # Red del host: el proxy de consolas GNS3 abre puertos dinámicos
     # y necesita llegar a 127.0.0.1 de los workspaces
     network_mode: host
+    # Conserva el grupo "docker" del usuario dentro del contenedor (requiere crun)
+    group_add:
+      - keep-groups
     env_file:
       - ../.env
     environment:
@@ -15,3 +18,5 @@ services:
     volumes:
       - ./volumes/internal/web/dist:/app/web:ro
       - ./volumes/logs:/app/logs
+      # Socket de Docker: la app crea/borra los workspaces GNS3
+      - /var/run/docker.sock:/var/run/docker.sock
