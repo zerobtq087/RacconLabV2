@@ -73,6 +73,8 @@ func (a *App) Rutas() http.Handler {
 	mux.Handle("GET /api/admin/usuarios/resumen", a.ConRol(a.ResumenUsuarios, "ADMIN"))
 	mux.Handle("PUT /api/admin/usuarios/editar", a.ConRol(a.EditarUsuario, "ADMIN"))
 	mux.Handle("PUT /api/admin/usuarios/password", a.ConRol(a.ResetPassword, "ADMIN"))
+	mux.Handle("PUT /api/admin/usuarios/datos", a.ConRol(a.EditarDatos, "ADMIN"))
+	mux.Handle("DELETE /api/admin/usuarios/{matricula}", a.ConRol(a.EliminarUsuario, "ADMIN"))
 
 	// Grupos: ADMIN ve todos, PROFESOR solo los suyos
 	mux.Handle("GET /api/grupos", a.ConRol(a.ListarGrupos, "ADMIN", "PROFESOR"))

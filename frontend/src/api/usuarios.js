@@ -23,6 +23,18 @@ export const usuariosApi = {
     return (await http.put('/admin/usuarios/editar', cambios)).data
   },
 
+  /**
+   * Corregir datos sin CSV.
+   * datos = { matricula (actual), nueva_matricula, nombre, grupo }
+   */
+  async editarDatos(datos) {
+    return (await http.put('/admin/usuarios/datos', datos)).data
+  },
+
+  async eliminar(matricula) {
+    await http.delete(`/admin/usuarios/${encodeURIComponent(matricula)}`)
+  },
+
   /** El admin pone una contraseña nueva sin conocer la anterior */
   async resetPassword(matricula, nueva) {
     await http.put('/admin/usuarios/password', { matricula, nueva_password: nueva })

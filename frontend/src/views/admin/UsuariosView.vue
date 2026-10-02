@@ -66,6 +66,12 @@
         </template>
         <template #item.acciones="{ item }">
           <v-btn
+            icon="mdi-pencil" variant="text" size="small"
+            :title="item.protegido ? 'El administrador general no se puede modificar' : 'Editar datos'"
+            :disabled="item.protegido"
+            @click="abrirDatos(item)"
+          />
+          <v-btn
             icon="mdi-shield-edit" variant="text" size="small"
             :title="item.protegido ? 'El administrador general no se puede modificar' : 'Editar roles'"
             :disabled="item.protegido"
@@ -77,10 +83,93 @@
             :disabled="item.protegido && !soyYo(item)"
             @click="abrirPassword(item)"
           />
+          <v-btn
+            icon="mdi-delete" variant="text" size="small" color="error"
+            :title="item.protegido ? 'El administrador general no se puede eliminar' : soyYo(item) ? 'No puedes eliminarte' : 'Eliminar'"
+            :disabled="item.protegido || soyYo(item)"
+            @click="abrirEliminar(item)"
+          />
         </template>
       </v-data-table-server>
     </v-card-text>
   </v-card>
+
+  <!-- Editar datos -->
+  <v-dialog v-model="dlgDatos.show" max-width="460">
+    <v-card>
+      <v-card-item>
+        <template #prepend><v-icon icon="mdi-pencil" color="primary" /></template>
+        <v-card-title>Editar datos</v-card-title>
+        <v-card-subtitle>{{ ETIQUETA_TIPO[dlgDatos.usuario?.tipo ?? ''] }} · <span class="font-mono">{{ dlgDatos.usuario?.matricula }}</span></v-card-subtitle>
+      </v-card-item>
+
+      <v-card-text>
+        <v-form ref="formDatosRef" @submit.prevent="guardarDatos">
+          <v-text-field
+            v-model="dlgDatos.matricula"
+            :label="dlgDatos.usuario?.tipo === 'alumnos' ? 'Matrícula' : 'Clave'"
+            class="font-mono"
+            :rules="[req, reglaMatricula]"
+            :disabled="soyYo(dlgDatos.usuario)"
+            :hint="soyYo(dlgDatos.usuario) ? 'No puedes cambiar tu propia clave' : 'Es su usuario para entrar'"
+            persistent-hint
+          />
+          <v-text-field v-model="dlgDatos.nombre" label="Nombre completo" class="mt-2" :rules="[req]" counter="120" />
+          <v-combobox
+            v-if="dlgDatos.usuario?.tipo === 'alumnos'"
+            v-model="dlgDatos.grupo"
+            :items="grupos"
+            label="Grupo"
+            class="mt-2 font-mono"
+            :rules="[req]"
+            hint="Elige uno o escribe uno nuevo (se crea solo)"
+            persistent-hint
+          />
+        </v-form>
+
+        <v-alert v-if="!soyYo(dlgDatos.usuario)" type="warning" variant="tonal" density="compact" class="mt-4"
+          text="Al guardar se cierran las sesiones abiertas de este usuario." />
+      </v-card-text>
+
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" @click="dlgDatos.show = false">Cancelar</v-btn>
+        <v-btn color="primary" :loading="guardando" @click="guardarDatos">Guardar</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
+  <!-- Eliminar -->
+  <v-dialog v-model="dlgEliminar.show" max-width="440">
+    <v-card>
+      <v-card-item>
+        <template #prepend><v-icon icon="mdi-alert" color="error" /></template>
+        <v-card-title>Eliminar usuario</v-card-title>
+      </v-card-item>
+      <v-card-text>
+        Se eliminará a <b>{{ dlgEliminar.usuario?.nombre }}</b>
+        (<span class="font-mono">{{ dlgEliminar.usuario?.matricula }}</span>) con sus roles, asignaciones a grupos
+        y laboratorios. <b>No se puede deshacer.</b>
+        <v-text-field
+          v-model="dlgEliminar.confirmacion"
+          class="mt-4 font-mono"
+          :label="`Escribe ${dlgEliminar.usuario?.matricula} para confirmar`"
+          hide-details
+        />
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" @click="dlgEliminar.show = false">Cancelar</v-btn>
+        <v-btn
+          color="error" :loading="guardando"
+          :disabled="dlgEliminar.confirmacion.trim().toLowerCase() !== dlgEliminar.usuario?.matricula"
+          @click="eliminar"
+        >
+          Eliminar
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
 
   <!-- Editar roles -->
   <v-dialog v-model="dlg.show" max-width="460">
@@ -330,6 +419,68 @@ const guardarRoles = async () => {
     cargarResumen()
   } catch (e) {
     noti.error(mensajeError(e, 'No se pudieron guardar los roles'))
+  } finally {
+    guardando.value = false
+  }
+}
+
+// ---- Datos (matrícula, nombre, grupo) ----
+const formDatosRef = ref<InstanceType<typeof VForm> | null>(null)
+const dlgDatos = reactive<{ show: boolean; usuario: Usuario | null; matricula: string; nombre: string; grupo: string | null }>({
+  show: false, usuario: null, matricula: '', nombre: '', grupo: null
+})
+
+const reglaMatricula = (v: string) =>
+  /^[a-z0-9._-]{1,20}$/.test((v || '').trim().toLowerCase()) || 'Solo letras, números, . _ - (máx. 20)'
+
+const abrirDatos = (u: Usuario) => {
+  Object.assign(dlgDatos, { show: true, usuario: u, matricula: u.matricula, nombre: u.nombre, grupo: u.grupo })
+}
+
+const guardarDatos = async () => {
+  const resultado = await formDatosRef.value?.validate()
+  if (!resultado?.valid || !dlgDatos.usuario) return
+  guardando.value = true
+  try {
+    await usuariosApi.editarDatos({
+      matricula: dlgDatos.usuario.matricula,
+      nueva_matricula: dlgDatos.matricula.trim().toLowerCase(),
+      nombre: dlgDatos.nombre,
+      grupo: dlgDatos.usuario.tipo === 'alumnos' ? dlgDatos.grupo : null
+    })
+    noti.exito('Datos actualizados')
+    dlgDatos.show = false
+    cargar()
+    cargarResumen()
+  } catch (e) {
+    noti.error(mensajeError(e, 'No se pudieron guardar los datos'))
+  } finally {
+    guardando.value = false
+  }
+}
+
+// ---- Eliminar ----
+const dlgEliminar = reactive<{ show: boolean; usuario: Usuario | null; confirmacion: string }>({
+  show: false, usuario: null, confirmacion: ''
+})
+
+const abrirEliminar = (u: Usuario) => {
+  Object.assign(dlgEliminar, { show: true, usuario: u, confirmacion: '' })
+}
+
+const eliminar = async () => {
+  if (!dlgEliminar.usuario) return
+  guardando.value = true
+  try {
+    await usuariosApi.eliminar(dlgEliminar.usuario.matricula)
+    noti.exito(`${dlgEliminar.usuario.matricula} eliminado`)
+    dlgEliminar.show = false
+    // Si era el último de la página, regresar una página
+    if (usuarios.value.length === 1 && pagina.value > 1) pagina.value--
+    else cargar()
+    cargarResumen()
+  } catch (e) {
+    noti.error(mensajeError(e, 'No se pudo eliminar'))
   } finally {
     guardando.value = false
   }
