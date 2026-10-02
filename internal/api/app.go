@@ -62,6 +62,8 @@ func (a *App) Rutas() http.Handler {
 
 	// Con sesión (cualquier rol)
 	mux.Handle("POST /api/auth/cambiar-rol", a.ConSesion(a.CambiarRol))
+	mux.Handle("GET /api/usuario/perfil", a.ConSesion(a.ObtenerPerfil))
+	mux.Handle("PUT /api/usuario/perfil/password", a.ConSesion(a.CambiarMiPassword))
 
 	// Solo ADMIN: importación masiva de usuarios
 	mux.Handle("POST /api/admin/importar/{tipo}", a.ConRol(a.SubirImportacion, "ADMIN"))
