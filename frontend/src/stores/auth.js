@@ -3,7 +3,10 @@ import http, { setAccessToken, refrescarSesion, registrarExpiracion } from '@/ap
 import { mockLogin } from '@/api/mock'
 import { normalizarRoles } from '@/utils/roles'
 
-const MOCK = import.meta.env.VITE_MOCK === 'true'
+// El login tiene su PROPIO interruptor de mock.
+// VITE_MOCK_AUTH=true  -> login simulado
+// sin definir / false  -> login real (Firebird + Redis)
+const MOCK = import.meta.env.VITE_MOCK_AUTH === 'true'
 const CLAVE_MOCK = 'raccoon_mock_sesion'
 
 export const useAuth = defineStore('auth', {
