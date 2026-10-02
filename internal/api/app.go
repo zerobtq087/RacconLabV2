@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"raccoon_lab/internal/config"
 	"raccoon_lab/internal/docker"
 	"raccoon_lab/internal/importar"
+	"raccoon_lab/internal/labs"
 	"raccoon_lab/internal/repositorio"
 	"raccoon_lab/internal/seguridad"
 	"raccoon_lab/internal/sesiones"
@@ -28,6 +30,7 @@ type App struct {
 	Limitador  *seguridad.Limitador
 	Importador *importar.Importador
 	Docker     *docker.Cliente
+	Labs       *labs.Servicio
 	Version    string
 	Inicio     time.Time
 }
@@ -38,6 +41,11 @@ func NuevaApp(cfg *config.Config, db *sql.DB, rdb *redis.Client, version string)
 	imp := importar.Nuevo(db, ses.EliminarTodas, os.TempDir())
 	imp.Protegida = cfg.AdminClave
 
+	dk := docker.Nuevo(docker.SocketPorDefecto)
+	laboratorios := labs.Nuevo(cfg, dk, &repositorio.WorkspaceRepo{DB: db})
+	// Al arrancar: reabrir los proxies de los laboratorios que siguen vivos
+	go laboratorios.Restaurar(context.Background())
+
 	return &App{
 		Cfg:        cfg,
 		DB:         db,
@@ -47,7 +55,8 @@ func NuevaApp(cfg *config.Config, db *sql.DB, rdb *redis.Client, version string)
 		Grupos:     &repositorio.GrupoRepo{DB: db},
 		Limitador:  seguridad.NuevoLimitador(5, 15*time.Minute),
 		Importador: imp,
-		Docker:     docker.Nuevo(docker.SocketPorDefecto),
+		Docker:     dk,
+		Labs:       laboratorios,
 		Version:    version,
 		Inicio:     time.Now(),
 	}
@@ -90,6 +99,11 @@ func (a *App) Rutas() http.Handler {
 	mux.Handle("POST /api/admin/grupos", a.ConRol(a.CrearGrupo, "ADMIN"))
 	mux.Handle("DELETE /api/admin/grupos/{codigo}", a.ConRol(a.EliminarGrupo, "ADMIN"))
 	mux.Handle("PUT /api/admin/grupos/{codigo}/docentes", a.ConRol(a.AsignarDocentes, "ADMIN"))
+
+	// Laboratorios GNS3 (cualquier rol)
+	mux.Handle("GET /api/labs/estado", a.ConSesion(a.EstadoLab))
+	mux.Handle("POST /api/labs/crear", a.ConSesion(a.CrearLab))
+	mux.Handle("POST /api/labs/limpiar", a.ConSesion(a.LimpiarLab))
 
 	// API que aún no existe -> 404 JSON
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {

@@ -2,26 +2,27 @@ import http from './http'
 import { useAuth } from '@/stores/auth'
 import * as mock from './mockLabs'
 
+// El laboratorio propio ya es REAL (Docker + GNS3).
+// Compañeros e invitaciones siguen simulados hasta el paso 9c.
 const MOCK = import.meta.env.VITE_MOCK === 'true'
 const yo = () => useAuth().usuario.matricula
 
 export const labsApi = {
   async estado() {
-    if (MOCK) return mock.mockEstado(yo())
     return (await http.get('/labs/estado')).data
   },
 
   /** { es_colaborativo: bool } o { codigo_lab: 'COLAB-XXXX' } */
   async crear(payload) {
-    if (MOCK) return mock.mockCrear(yo(), useAuth().rol, payload)
-    return (await http.post('/labs/crear', payload, { timeout: 180000 })).data
+    // Levantar GNS3 y cargar plantillas puede tardar ~2 min
+    return (await http.post('/labs/crear', payload, { timeout: 300000 })).data
   },
 
   async limpiar() {
-    if (MOCK) return mock.mockLimpiar(yo())
-    return (await http.post('/labs/limpiar', {}, { timeout: 60000 })).data
+    return (await http.post('/labs/limpiar', {}, { timeout: 120000 })).data
   },
 
+  // ----- Equipo (paso 9c) -----
   async companeros() {
     if (MOCK) return mock.mockCompaneros(yo())
     return (await http.get('/labs/companeros')).data

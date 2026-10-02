@@ -23,6 +23,13 @@ type Redis struct {
 	Password  string
 }
 
+// GNS3: workspaces en Docker
+type GNS3 struct {
+	Volumes    string // carpeta del HOST con gns3_images, gns3_projects y ansible
+	Imagen     string // imagen Docker del workspace
+	PuertoBase int    // primer puerto interno; cada workspace usa un bloque de 200
+}
+
 type Config struct {
 	Puerto         string
 	Entorno        string
@@ -35,6 +42,7 @@ type Config struct {
 
 	DB    BaseDatos
 	Redis Redis
+	GNS3  GNS3
 }
 
 func env(clave, porDefecto string) string {
@@ -49,6 +57,11 @@ func Cargar() (*Config, error) {
 	puertoDB, err := strconv.Atoi(env("DB_PORT", "3050"))
 	if err != nil {
 		return nil, fmt.Errorf("DB_PORT inválido: %w", err)
+	}
+
+	puertoGNS3, err := strconv.Atoi(env("GNS3_BASE_PORT", "30000"))
+	if err != nil {
+		return nil, fmt.Errorf("GNS3_BASE_PORT inválido: %w", err)
 	}
 
 	cfg := &Config{
@@ -72,6 +85,11 @@ func Cargar() (*Config, error) {
 			Direccion: env("REDIS_ADDR", "127.0.0.1:6379"),
 			Password:  env("REDIS_PASSWORD", ""),
 		},
+		GNS3: GNS3{
+			Volumes:    env("GNS3_VOLUMES", ""),
+			Imagen:     env("GNS3_WORKSPACE_IMAGE", "gns3-workspace:2.2.59"),
+			PuertoBase: puertoGNS3,
+		},
 	}
 
 	if err := cfg.validar(); err != nil {
@@ -94,6 +112,9 @@ func (c *Config) validar() error {
 	}
 	if len(c.AdminPassword) < 8 {
 		faltan = append(faltan, "ADMIN_PASSWORD (mínimo 8 caracteres)")
+	}
+	if c.GNS3.Volumes == "" {
+		faltan = append(faltan, "GNS3_VOLUMES")
 	}
 	if len(faltan) > 0 {
 		return fmt.Errorf("faltan variables en el .env: %s", strings.Join(faltan, ", "))

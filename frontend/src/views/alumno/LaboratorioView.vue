@@ -17,7 +17,7 @@
         <v-card-text>
           <v-switch
             v-model="colaborativo"
-            :disabled="activo"
+            :disabled="activo || creando"
             color="primary"
             inset
             label="Modo colaborativo (equipo)"
@@ -42,6 +42,10 @@
             <div class="text-h6 font-mono">{{ estado.codigo_lab }}</div>
           </v-alert>
 
+          <v-alert v-if="creando && !codigoUnirse" type="info" variant="tonal" density="compact" class="mb-3" icon="mdi-timer-sand">
+            Levantando GNS3 y cargando plantillas… puede tardar hasta 2 minutos. No cierres la página.
+          </v-alert>
+
           <v-btn
             block size="large" color="primary" class="mb-3" prepend-icon="mdi-rocket-launch"
             :loading="creando" :disabled="activo" @click="desplegar"
@@ -52,9 +56,9 @@
           <v-btn
             block variant="outlined" color="error"
             :prepend-icon="activo && !estado.soy_dueno ? 'mdi-exit-run' : 'mdi-broom'"
-            :loading="limpiando" :disabled="!activo" @click="confirmar = true"
+            :loading="limpiando" :disabled="!tieneLab" @click="confirmar = true"
           >
-            {{ activo && !estado.soy_dueno ? 'Salir del laboratorio' : 'Limpiar entorno' }}
+            {{ tieneLab && !estado.soy_dueno ? 'Salir del laboratorio' : 'Limpiar entorno' }}
           </v-btn>
         </v-card-text>
       </v-card>
@@ -70,7 +74,9 @@
           </v-chip>
         </template>
         <v-card-text>
-          <div v-if="!activo" class="text-medium-emphasis py-6 text-center">
+          <v-alert v-if="estado.aviso" type="warning" variant="tonal" density="compact" class="mb-4" :text="estado.aviso" />
+
+          <div v-if="!tieneLab" class="text-medium-emphasis py-6 text-center">
             <v-icon icon="mdi-server-off" size="48" class="mb-2" />
             <div>No hay un laboratorio activo.</div>
             <div class="text-caption">Al desplegarlo verás aquí la IP, el puerto y el token.</div>
@@ -80,9 +86,13 @@
             <v-col cols="12" sm="5"><CampoCopiable label="Puerto" :valor="estado.puerto_web" /></v-col>
             <v-col cols="12"><CampoCopiable label="Token de acceso" :valor="estado.token_acceso" secreto /></v-col>
             <v-col cols="12">
-              <v-btn :href="urlWeb" target="_blank" color="secondary" variant="tonal" prepend-icon="mdi-open-in-new" block>
+              <v-btn :href="urlWeb" target="_blank" color="secondary" variant="tonal" prepend-icon="mdi-open-in-new" block :disabled="!activo">
                 Abrir GNS3 Web UI
               </v-btn>
+              <div class="text-caption text-medium-emphasis mt-2">
+                El navegador te pedirá usuario y contraseña: escribe tu <b>matrícula</b> y el <b>token</b>.
+                En GNS3 de escritorio: servidor remoto <span class="font-mono">{{ estado.ip_real_host }}:{{ estado.puerto_web }}</span>, autenticación activada.
+              </div>
             </v-col>
           </v-row>
         </v-card-text>
@@ -146,10 +156,10 @@
     <v-card :title="estado.soy_dueno ? '¿Limpiar el entorno?' : '¿Salir del laboratorio?'" prepend-icon="mdi-alert">
       <v-card-text>
         <template v-if="estado.soy_dueno && estado.es_colaborativo">
-          Se cerrará el laboratorio para <b>todo el equipo</b>.
+          Se cerrará el laboratorio para <b>todo el equipo</b>. Tus proyectos de GNS3 se conservan para la próxima vez.
         </template>
         <template v-else-if="estado.soy_dueno">
-          Se detendrá tu contenedor GNS3 y se liberarán los recursos.
+          Se detendrá tu contenedor GNS3 y se liberarán los recursos. Tus proyectos se conservan para la próxima vez.
         </template>
         <template v-else>
           Saldrás del laboratorio; el resto del equipo puede seguir trabajando.
@@ -171,9 +181,24 @@ import { labsApi } from '@/api/labs'
 import { mensajeError } from '@/api/http'
 import { useNotificaciones } from '@/stores/notificaciones'
 
+interface EstadoLab {
+  running?: boolean
+  id_workspace?: string
+  ip_real_host?: string
+  puerto_web?: number
+  token_acceso?: string
+  es_colaborativo?: boolean
+  soy_dueno?: boolean
+  codigo_lab?: string
+  aviso?: string
+}
+
+interface Companero { matricula: string; nombre: string; ocupado?: boolean }
+interface Invitacion { id_invitacion: string; emisor: string; nombre_emisor?: string }
+
 const noti = useNotificaciones()
 
-const estado = ref({})
+const estado = ref<EstadoLab>({})
 const colaborativo = ref(false)
 const codigoUnirse = ref('')
 const consultando = ref(false)
@@ -182,19 +207,23 @@ const limpiando = ref(false)
 const confirmar = ref(false)
 
 const panelEquipo = ref(false)
-const companeros = ref([])
-const invitaciones = ref([])
-const invitando = ref(null)
+const companeros = ref<Companero[]>([])
+const invitaciones = ref<Invitacion[]>([])
+const invitando = ref<string | null>(null)
 
-const activo = computed(() => !!(estado.value.running || estado.value.status?.running))
-const puedeInvitar = computed(() => activo.value && estado.value.es_colaborativo && estado.value.soy_dueno)
+// tieneLab: hay registro (aunque el contenedor esté caído) | activo: además está corriendo
+const tieneLab = computed(() => !!estado.value.id_workspace)
+const activo = computed(() => tieneLab.value && !!estado.value.running)
+const puedeInvitar = computed(() => activo.value && !!estado.value.es_colaborativo && !!estado.value.soy_dueno)
 const urlWeb = computed(() => `http://${estado.value.ip_real_host}:${estado.value.puerto_web}/`)
+
+const estadoHttp = (e: unknown) => (e as { response?: { status?: number } })?.response?.status
 
 const consultar = async () => {
   consultando.value = true
   try {
     estado.value = await labsApi.estado()
-    if (activo.value) colaborativo.value = !!estado.value.es_colaborativo
+    if (tieneLab.value) colaborativo.value = !!estado.value.es_colaborativo
   } catch (e) {
     noti.error(mensajeError(e, 'No se pudo consultar el laboratorio'))
   } finally {
@@ -205,11 +234,11 @@ const consultar = async () => {
 const desplegar = async () => {
   creando.value = true
   try {
-    await labsApi.crear({ es_colaborativo: colaborativo.value })
-    await consultar()
-    noti.exito('Laboratorio desplegado')
+    estado.value = await labsApi.crear({ es_colaborativo: colaborativo.value })
+    if (estado.value.aviso) noti.error(estado.value.aviso)
+    else noti.exito('Laboratorio desplegado')
   } catch (e) {
-    if (e.response?.status === 409) await consultar()
+    if (estadoHttp(e) === 409) await consultar()
     noti.error(mensajeError(e, 'No se pudo desplegar el laboratorio'))
   } finally {
     creando.value = false
@@ -219,9 +248,8 @@ const desplegar = async () => {
 const unirse = async () => {
   creando.value = true
   try {
-    await labsApi.crear({ codigo_lab: codigoUnirse.value.trim().toUpperCase() })
+    estado.value = await labsApi.crear({ codigo_lab: codigoUnirse.value.trim().toUpperCase() })
     codigoUnirse.value = ''
-    await consultar()
     noti.exito('Te uniste al laboratorio del equipo')
   } catch (e) {
     noti.error(mensajeError(e, 'Código inválido o laboratorio cerrado'))
@@ -248,8 +276,8 @@ const limpiar = async () => {
 
 const cargarEquipo = async () => {
   const [c, i] = await Promise.allSettled([labsApi.companeros(), labsApi.pendientes()])
-  companeros.value = c.value || []
-  invitaciones.value = i.value || []
+  companeros.value = c.status === 'fulfilled' ? c.value || [] : []
+  invitaciones.value = i.status === 'fulfilled' ? i.value || [] : []
 }
 
 const abrirEquipo = () => {
@@ -257,7 +285,7 @@ const abrirEquipo = () => {
   cargarEquipo()
 }
 
-const invitar = async (c) => {
+const invitar = async (c: Companero) => {
   invitando.value = c.matricula
   try {
     await labsApi.invitar(c.matricula)
@@ -269,7 +297,7 @@ const invitar = async (c) => {
   }
 }
 
-const responder = async (inv, aceptar) => {
+const responder = async (inv: Invitacion, aceptar: boolean) => {
   try {
     await labsApi.responder(inv.id_invitacion, aceptar)
     if (aceptar) {
