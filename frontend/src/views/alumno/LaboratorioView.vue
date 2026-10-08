@@ -175,7 +175,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import CampoCopiable from '@/components/CampoCopiable.vue'
 import { labsApi } from '@/api/labs'
 import { mensajeError } from '@/api/http'
@@ -314,8 +314,20 @@ const responder = async (inv: Invitacion, aceptar: boolean) => {
   }
 }
 
+// Revisar invitaciones cada 20 s para que el aviso aparezca sin recargar
+let reloj: ReturnType<typeof setInterval> | null = null
+
 onMounted(async () => {
   await consultar()
   cargarEquipo()
+  reloj = setInterval(async () => {
+    try {
+      invitaciones.value = (await labsApi.pendientes()) || []
+    } catch { /* sin conexión: se reintenta en el siguiente ciclo */ }
+  }, 20000)
+})
+
+onBeforeUnmount(() => {
+  if (reloj) clearInterval(reloj)
 })
 </script>

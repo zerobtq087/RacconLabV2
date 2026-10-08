@@ -104,6 +104,14 @@ func (a *App) Rutas() http.Handler {
 	mux.Handle("GET /api/labs/estado", a.ConSesion(a.EstadoLab))
 	mux.Handle("POST /api/labs/crear", a.ConSesion(a.CrearLab))
 	mux.Handle("POST /api/labs/limpiar", a.ConSesion(a.LimpiarLab))
+	mux.Handle("GET /api/labs/companeros", a.ConSesion(a.CompanerosLab))
+	mux.Handle("POST /api/labs/invitaciones/invitar", a.ConSesion(a.InvitarLab))
+	mux.Handle("GET /api/labs/invitaciones/pendientes", a.ConSesion(a.PendientesLab))
+	mux.Handle("POST /api/labs/invitaciones/responder", a.ConSesion(a.ResponderLab))
+
+	// Solo ADMIN: monitor de laboratorios
+	mux.Handle("GET /api/admin/workspaces", a.ConRol(a.ListarWorkspaces, "ADMIN"))
+	mux.Handle("DELETE /api/admin/workspaces/{id}", a.ConRol(a.CerrarWorkspace, "ADMIN"))
 
 	// API que aún no existe -> 404 JSON
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
