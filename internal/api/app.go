@@ -109,6 +109,9 @@ func (a *App) Rutas() http.Handler {
 	mux.Handle("GET /api/labs/invitaciones/pendientes", a.ConSesion(a.PendientesLab))
 	mux.Handle("POST /api/labs/invitaciones/responder", a.ConSesion(a.ResponderLab))
 
+	// Maestro (o admin): desplegar plantillas Ansible en su laboratorio
+	mux.Handle("POST /api/labs/profesor/despliegue", a.ConRol(a.DesplegarPlantilla, "PROFESOR", "ADMIN"))
+
 	// Solo ADMIN: monitor de laboratorios
 	mux.Handle("GET /api/admin/workspaces", a.ConRol(a.ListarWorkspaces, "ADMIN"))
 	mux.Handle("DELETE /api/admin/workspaces/{id}", a.ConRol(a.CerrarWorkspace, "ADMIN"))

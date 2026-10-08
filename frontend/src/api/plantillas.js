@@ -1,11 +1,12 @@
 import http from './http'
-import { mockDesplegarPlantilla } from './mockPlantillas'
 
-const MOCK = import.meta.env.VITE_MOCK === 'true'
-
+/*
+ * Plantillas Ansible: real. Ya no usa mock.
+ * Se despliegan en el laboratorio del maestro (el de "Mi laboratorio").
+ */
 export const plantillasApi = {
   async desplegar(payload) {
-    if (MOCK) return mockDesplegarPlantilla(payload)
-    return (await http.post('/labs/profesor/despliegue', payload, { timeout: 180000 })).data
+    // Ansible crea nodos, espera a que arranquen los routers y los configura: varios minutos
+    return (await http.post('/labs/profesor/despliegue', payload, { timeout: 600000 })).data
   }
 }
