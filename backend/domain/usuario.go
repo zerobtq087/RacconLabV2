@@ -13,6 +13,7 @@ type Usuario struct {
 	Activo       bool       `gorm:"column:ACTIVO" json:"activo"`
 	UltimoAcceso *time.Time `gorm:"column:ULTIMO_ACCESO" json:"ultimo_acceso"`
 	Roles        []string   `gorm:"-" json:"roles"`
+	Protegido    bool       `gorm:"-" json:"protegido"` // admin general: no se edita ni se borra
 }
 
 // UserAccount: lo que recibe el frontend en /api/current-user-acc
@@ -24,4 +25,19 @@ type UserAccount struct {
 	Rol       string   `json:"rol"`   // rol con el que entró
 	Roles     []string `json:"roles"` // todos sus roles
 	Grupo     string   `json:"grupo"`
+}
+
+// UsuarioPagina: una página de la tabla de usuarios
+type UsuarioPagina struct {
+	Total    int       `json:"total"`
+	Usuarios []Usuario `json:"usuarios"`
+}
+
+// FiltroUsuarios: lo que manda la tabla del frontend
+type FiltroUsuarios struct {
+	Pagina    int    `query:"pagina"`
+	PorPagina int    `query:"por_pagina"`
+	Buscar    string `query:"buscar"`
+	Tipo      string `query:"tipo"`
+	Grupo     string `query:"grupo"`
 }

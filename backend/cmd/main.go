@@ -55,7 +55,7 @@ func main() {
 	})
 	app.Use(helmet.New())
 
-	router.SetupRoutes(app, db, sess)
+	router.SetupRoutes(app, env, db, sess)
 
 	if err := app.Listen(env.Port); err != nil {
 		log.Fatalf("Error starting server: %v", err)
