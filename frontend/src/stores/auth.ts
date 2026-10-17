@@ -13,7 +13,8 @@ export const useAuthStore = defineStore('auth', () => {
     isLoading.value = true
     try {
       const response = await axios.get('/api/current-user-acc')
-      userAcc.value = response.data
+      // Solo es válido si de verdad llegó un usuario (con id)
+      userAcc.value = response.data?.id ? response.data : new UserAccount()
     } catch {
       userAcc.value = new UserAccount()
       error.value = 'No autorizado'
@@ -28,4 +29,3 @@ export const useAuthStore = defineStore('auth', () => {
 
   return { userAcc, fetchProfile, clear, isLoading, error }
 })
-

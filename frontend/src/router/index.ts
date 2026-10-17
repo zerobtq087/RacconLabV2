@@ -20,55 +20,16 @@ import { useAuthStore } from '@/stores/auth'
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    {
-      path: '/',
-      component: Index,
-      meta: { requiresAuth: true },
-    },
-    {
-      path: '/usuarios',
-      component: Usuarios,
-      meta: { requiresAuth: true, roles: ['ADMIN'] },
-    },
-    {
-      path: '/importar',
-      component: Importar,
-      meta: { requiresAuth: true, roles: ['ADMIN'] },
-    },
-    {
-      path: '/grupos',
-      component: Grupos,
-      meta: { requiresAuth: true, roles: ['ADMIN', 'PROFESOR'] },
-    },
-    {
-      path: '/laboratorio',
-      component: Laboratorio,
-      meta: { requiresAuth: true, roles: ['ALUMNO', 'PROFESOR'] },
-    },
-    {
-      path: '/plantillas',
-      component: Plantillas,
-      meta: { requiresAuth: true, roles: ['PROFESOR'] },
-    },
-    {
-      path: '/monitor',
-      component: Monitor,
-      meta: { requiresAuth: true, roles: ['ADMIN'] },
-    },
-    {
-      path: '/settings',
-      component: Settings,
-      meta: { requiresAuth: true },
-    },
-    {
-      path: '/login',
-      component: Login,
-      meta: { requiresAuth: false, requiresGuest: true },
-    },
-    {
-      path: '/:pathMatch(.*)*',
-      redirect: '/',
-    },
+    { path: '/', component: Index, meta: { requiresAuth: true } },
+    { path: '/usuarios', component: Usuarios, meta: { requiresAuth: true, roles: ['ADMIN'] } },
+    { path: '/importar', component: Importar, meta: { requiresAuth: true, roles: ['ADMIN'] } },
+    { path: '/grupos', component: Grupos, meta: { requiresAuth: true, roles: ['ADMIN', 'PROFESOR'] } },
+    { path: '/laboratorio', component: Laboratorio, meta: { requiresAuth: true, roles: ['ALUMNO', 'PROFESOR'] } },
+    { path: '/plantillas', component: Plantillas, meta: { requiresAuth: true, roles: ['PROFESOR'] } },
+    { path: '/monitor', component: Monitor, meta: { requiresAuth: true, roles: ['ADMIN'] } },
+    { path: '/settings', component: Settings, meta: { requiresAuth: true } },
+    { path: '/login', component: Login, meta: { requiresAuth: false, requiresGuest: true } },
+    { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
 
@@ -76,16 +37,17 @@ router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
 
   // Si no tenemos usuario, lo pedimos al backend (la sesión vive en la cookie)
-  if (authStore.userAcc.id == '' && (to.meta.requiresAuth || to.meta.requiresGuest)) {
+  if (!authStore.userAcc.id && (to.meta.requiresAuth || to.meta.requiresGuest)) {
     await authStore.fetchProfile()
   }
 
   // Páginas que solo puede ver cierto rol: meta: { roles: ['ADMIN'] }
   const roles = to.meta.roles as string[] | undefined
+  const logueado = !!authStore.userAcc.id
 
-  if (to.meta.requiresAuth && authStore.userAcc.id == '') {
+  if (to.meta.requiresAuth && !logueado) {
     next('/login')
-  } else if (to.meta.requiresGuest && authStore.userAcc.id != '') {
+  } else if (to.meta.requiresGuest && logueado) {
     next('/')
   } else if (roles && !roles.includes(authStore.userAcc.rol)) {
     next('/')

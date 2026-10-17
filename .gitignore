@@ -1,0 +1,18 @@
+# Secretos
+.env
+*.env.local
+
+# Binarios de Go
+/app
+/raccoon
+*.exe
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.yarn/install-state.gz
+frontend/.yarn/cache/
+
+# Editores
+.vscode/
+.idea/
