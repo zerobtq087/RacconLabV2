@@ -1,10 +1,11 @@
 <template>
   <v-app>
-    <router-view />
-    <AppNotificaciones />
+    <v-main>
+      <router-view />
+    </v-main>
   </v-app>
 </template>
 
 <script lang="ts" setup>
-import AppNotificaciones from '@/components/AppNotificaciones.vue'
+  //
 </script>
