@@ -1,10 +1,13 @@
 package router
 
 import (
+	"context"
+
 	"raccoon-lab/backend/config"
 	"raccoon-lab/backend/handler"
 	"raccoon-lab/backend/middleware"
 	"raccoon-lab/backend/repository"
+	"raccoon-lab/backend/service"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/logger"
@@ -36,6 +39,14 @@ func SetupRoutes(app *fiber.App, env *config.Env, db *gorm.DB, s *middleware.Ses
 	usuarios.Put("/:id/password", usuarioHandler.UpdatePasswd)
 	usuarios.Delete("/:id", usuarioHandler.Delete)
 	api.Get("/maestros", s.Validate, admin, usuarioHandler.Maestros)
+
+	// Importar usuarios desde CSV/Excel (solo admin)
+	importacionRepo := repository.NewImportacionRepository(db)
+	cerrarSesiones := func(ctx context.Context, userID string) { _ = s.CloseAll(ctx, userID, "") }
+	importador := service.NewImportador(importacionRepo, cerrarSesiones, env.AdminUser)
+	importarHandler := handler.NewImportarHandler(importacionRepo, importador)
+	api.Post("/importar", s.Validate, admin, importarHandler.Upload)
+	api.Get("/importar/:id", s.Validate, admin, importarHandler.Status)
 
 	// Grupos (admin todo; maestro solo ve los suyos)
 	grupos := api.Group("/grupos", s.Validate, adminProfesor)
