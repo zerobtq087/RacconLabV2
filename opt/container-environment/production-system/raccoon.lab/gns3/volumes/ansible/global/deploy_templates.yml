@@ -1,0 +1,182 @@
+---
+- name: Cargar Dispositivos RacconLAB (GNS3 Templates)
+  hosts: "{{ target_host }}"
+  gather_facts: no
+  # El GNS3 server del laboratorio pide usuario y contraseña (token)
+  module_defaults:
+    ansible.builtin.uri:
+      url_username: "{{ gns3_user | default(omit) }}"
+      url_password: "{{ gns3_password | default(omit) }}"
+      force_basic_auth: true
+    uri:
+      url_username: "{{ gns3_user | default(omit) }}"
+      url_password: "{{ gns3_password | default(omit) }}"
+      force_basic_auth: true
+  vars:
+    # Go manda gns3_url con -e; el host se saca de ahí
+    gns3_url: "http://localhost:3080"
+    gns3_host: "{{ gns3_url | urlsplit('hostname') }}"
+    # Warnings
+    ansible_python_interpreter: /usr/bin/python3
+
+    # Routers principales: Dynamips, no necesitan KVM. Se registran siempre;
+    # si falta la imagen, Go avisa al alumno que faltan imágenes.
+    templates:
+      - name: "Cisco 7200 RaccoonLAB"
+        compute_id: "local"
+        template_type: "dynamips"
+        image: "/root/GNS3/images/IOS/c7200-adventerprisek9-mz.124-24.T5.bin"
+        platform: "c7200"
+        ram: 512
+        disk0: 0
+        disk1: 0
+        idlepc: "0x606df838" # evita que el router use el 100% del CPU
+        console_type: "telnet"
+        category: "router"
+        symbol: ":/symbols/classic/router.svg"
+        usage: "Cisco 7200 con IOS 12.4(24)T5"
+        slot0: "C7200-IO-FE"
+        slot1: "PA-FE-TX"
+        slot2: "PA-8T"
+        slot3: "PA-GE"
+        slot4: "PA-GE"
+        slot5: "PA-GE"
+
+      - name: "Cisco 3725 RaccoonLAB"
+        compute_id: "local"
+        template_type: "dynamips"
+        image: "/root/GNS3/images/IOS/c3725-adventerprisek9-mz.124-15.T14.image"
+        platform: "c3725"
+        ram: 256
+        disk0: 0
+        disk1: 0
+        idlepc: "0x0"
+        console_type: "telnet"
+        category: "router"
+        symbol: ":/symbols/classic/router.svg"
+        usage: "Cisco 3725 con IOS 12.4(15)T14"
+        slot1: "NM-1FE-TX"
+        slot2: "NM-4T"
+
+    # Opcionales: QEMU (sin KVM van muy lentos). Solo se registran
+    # si su imagen existe en /root/GNS3/images/QEMU
+    opcionales:
+      - name: "Cisco IOSv RaccoonLAB"
+        compute_id: "local"
+        template_type: "qemu"
+        qemu_path: "/usr/bin/qemu-system-x86_64"
+        platform: "x86_64"
+        hda_disk_image: "vios-adventerprisek9-m.vmdk.SPA.156-2.T.qcow2"
+        hda_disk_interface: "virtio"
+        ram: 512
+        cpus: 1
+        console_type: "telnet"
+        adapters: 4
+        adapter_type: "e1000"
+        boot_priority: "c"
+        linked_clone: true
+        process_priority: "normal"
+        category: "router"
+        usage: "No default password/enable. No default config."
+
+      - name: "Cisco IOSvL2 RaccoonLAB"
+        compute_id: "local"
+        template_type: "qemu"
+        qemu_path: "/usr/bin/qemu-system-x86_64"
+        platform: "x86_64"
+        hda_disk_image: "viosl2-vios_l2-adventerprisek9-m.ssa.high_iron_20200929.qcow2"
+        hda_disk_interface: "virtio"
+        ram: 768
+        cpus: 1
+        console_type: "telnet"
+        adapters: 16
+        adapter_type: "e1000"
+        boot_priority: "c"
+        linked_clone: true
+        category: "switch"
+        port_name_format: "Gi{1}/{0}"
+        port_segment_size: 4
+        symbol: ":/symbols/classic/multilayer_switch.svg"
+        usage: "No default password/enable. Layer 2/3 switch."
+
+      - name: "Cisco CSR1000v RaccoonLAB"
+        compute_id: "local"
+        template_type: "qemu"
+        qemu_path: "/usr/bin/qemu-system-x86_64"
+        platform: "x86_64"
+        hda_disk_image: "csr1000v-universalk9.16.12.01a-serial.qcow2"
+        hda_disk_interface: "ide"
+        ram: 3072
+        cpus: 1
+        console_type: "telnet"
+        adapters: 4
+        adapter_type: "vmxnet3"
+        boot_priority: "c"
+        linked_clone: true
+        category: "router"
+        usage: "Usuario/contraseña por defecto: ninguno. Necesita KVM y 3 GB de RAM."
+
+      - name: "MikroTik CHR RaccoonLAB"
+        compute_id: "local"
+        template_type: "qemu"
+        qemu_path: "/usr/bin/qemu-system-x86_64"
+        platform: "x86_64"
+        hda_disk_image: "chr-6.49.17.img"
+        hda_disk_interface: "virtio"
+        ram: 384
+        cpus: 1
+        console_type: "telnet"
+        adapters: 8
+        adapter_type: "virtio-net-pci"
+        boot_priority: "c"
+        linked_clone: true
+        category: "router"
+        symbol: ":/symbols/router_firewall.svg"
+        port_name_format: "ether{1}"
+        options: "-nographic"
+        usage: "Default credentials: Username 'admin'..."
+
+    # Las PCs de los alumnos son VPCS, que ya viene integrado en GNS3 (no necesita plantilla)
+
+  tasks:
+    - name: Esperar a que el servidor interno de GNS3 levante (Puerto Dinámico)
+      ansible.builtin.wait_for:
+        host: "{{ gns3_host }}"
+        port: "{{ gns3_url | urlsplit('port') }}"
+        delay: 2
+        timeout: 15
+      connection: local
+
+    - name: Revisar qué imágenes QEMU opcionales existen
+      ansible.builtin.stat:
+        path: "/root/GNS3/images/QEMU/{{ item.hda_disk_image }}"
+      loop: "{{ opcionales }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: imagenes_qemu
+
+    - name: Agregar solo las opcionales que tienen imagen
+      ansible.builtin.set_fact:
+        templates: "{{ templates + [item.item] }}"
+      loop: "{{ imagenes_qemu.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: item.stat.exists
+
+    - name: Obtener lista de templates actuales en el contenedor del alumno
+      uri:
+        url: "{{ gns3_url }}/v2/templates"
+        method: GET
+      register: existing_templates
+
+    - name: Crear templates en GNS3 solo si no existen
+      uri:
+        url: "{{ gns3_url }}/v2/templates"
+        method: POST
+        body_format: json
+        body: "{{ item }}"
+        status_code: [201, 409]
+      loop: "{{ templates }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: "item.name not in (existing_templates.json | map(attribute='name') | list)"

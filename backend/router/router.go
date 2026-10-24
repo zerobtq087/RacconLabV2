@@ -58,4 +58,22 @@ func SetupRoutes(app *fiber.App, env *config.Env, db *gorm.DB, s *middleware.Ses
 	grupos.Delete("/:id", admin, grupoHandler.Delete)
 	grupos.Put("/:id/docentes", admin, grupoHandler.SetDocentes)
 	api.Get("/carreras", s.Validate, admin, grupoHandler.Carreras)
+
+	// Laboratorios GNS3 (alumno y maestro)
+	laboratorioRepo := repository.NewLaboratorioRepository(db)
+	laboratorios := service.NewLaboratorios(laboratorioRepo, service.NewDocker(env.DockerSocket), env)
+	laboratorioHandler := handler.NewLaboratorioHandler(laboratorioRepo, laboratorios)
+	labs := api.Group("/labs", s.Validate, s.RequireRol("ALUMNO", "PROFESOR"))
+	labs.Get("/", laboratorioHandler.Status)
+	labs.Post("/", laboratorioHandler.Create)
+	labs.Delete("/", laboratorioHandler.Leave)
+	labs.Post("/unirse", laboratorioHandler.Join)
+	labs.Get("/companeros", laboratorioHandler.Companeros)
+	labs.Get("/invitaciones", laboratorioHandler.Invitations)
+	labs.Post("/invitaciones", laboratorioHandler.Invite)
+	labs.Put("/invitaciones/:id", laboratorioHandler.Answer)
+
+	// Monitor de laboratorios (solo admin)
+	api.Get("/monitor", s.Validate, admin, laboratorioHandler.Monitor)
+	api.Delete("/monitor/:id", s.Validate, admin, laboratorioHandler.Close)
 }

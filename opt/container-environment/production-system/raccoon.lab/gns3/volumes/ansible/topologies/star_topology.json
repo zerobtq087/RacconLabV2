@@ -1,0 +1,107 @@
+{
+  "nodes": [
+    {
+      "name": "R2",
+      "template": "Cisco 7200 RaccoonLAB",
+      "type": "cisco",
+      "x": 0,
+      "y": 0,
+      "interfaces": [
+        { "name": "Serial2/0", "subnet_tag": "link_a", "host_number": 1 },
+        { "name": "Serial2/1", "subnet_tag": "link_b", "host_number": 1 },
+        { "name": "Serial2/2", "subnet_tag": "link_c", "host_number": 1 },
+        { "name": "Serial2/3", "subnet_tag": "link_d", "host_number": 1 }
+      ]
+    },
+    {
+      "name": "R1",
+      "template": "Cisco 7200 RaccoonLAB",
+      "type": "cisco",
+      "x": -250,
+      "y": 150,
+      "interfaces": [
+        { "name": "GigabitEthernet1/0", "subnet_tag": "lan_e", "host_number": 1 },
+        { "name": "Serial2/0",          "subnet_tag": "link_a", "host_number": 2 }
+      ]
+    },
+    {
+      "name": "R3",
+      "template": "Cisco 7200 RaccoonLAB",
+      "type": "cisco",
+      "x": 250,
+      "y": -100,
+      "interfaces": [
+        { "name": "GigabitEthernet1/0", "subnet_tag": "lan_g", "host_number": 1 },
+        { "name": "Serial2/1",          "subnet_tag": "link_b", "host_number": 2 }
+      ]
+    },
+    {
+      "name": "R4",
+      "template": "Cisco 7200 RaccoonLAB",
+      "type": "cisco",
+      "x": -200,
+      "y": -200,
+      "interfaces": [
+        { "name": "GigabitEthernet1/0", "subnet_tag": "lan_f", "host_number": 1 },
+        { "name": "Serial2/2",          "subnet_tag": "link_c", "host_number": 2 }
+      ]
+    },
+    {
+      "name": "R5",
+      "template": "Cisco 7200 RaccoonLAB",
+      "type": "cisco",
+      "x": 200,
+      "y": 200,
+      "interfaces": [
+        { "name": "GigabitEthernet1/0", "subnet_tag": "lan_h", "host_number": 1 },
+        { "name": "Serial2/3",          "subnet_tag": "link_d", "host_number": 2 }
+      ]
+    },
+    {
+      "name": "Host01",
+      "template": "HostUbuntu RaccoonLAB",
+      "type": "docker",
+      "x": -450,
+      "y": 150,
+      "subnet_tag": "lan_e",
+      "host_number": 10
+    },
+    {
+      "name": "Host02",
+      "template": "HostUbuntu RaccoonLAB",
+      "type": "docker",
+      "x": -200,
+      "y": -350,
+      "subnet_tag": "lan_f",
+      "host_number": 10
+    },
+    {
+      "name": "Host03",
+      "template": "HostUbuntu RaccoonLAB",
+      "type": "docker",
+      "x": 450,
+      "y": -100,
+      "subnet_tag": "lan_g",
+      "host_number": 10
+    },
+    {
+      "name": "Host04",
+      "template": "HostUbuntu RaccoonLAB",
+      "type": "docker",
+      "x": 200,
+      "y": 350,
+      "subnet_tag": "lan_h",
+      "host_number": 10
+    }
+  ],
+  "links": [
+    { "node_a": "R2", "port_a": 2, "port_a_sub": 0, "node_b": "R1", "port_b": 2, "port_b_sub": 0 },
+    { "node_a": "R2", "port_a": 2, "port_a_sub": 1, "node_b": "R3", "port_b": 2, "port_b_sub": 1 },
+    { "node_a": "R2", "port_a": 2, "port_a_sub": 2, "node_b": "R4", "port_b": 2, "port_b_sub": 2 },
+    { "node_a": "R2", "port_a": 2, "port_a_sub": 3, "node_b": "R5", "port_b": 2, "port_b_sub": 3 },
+    { "node_a": "R1", "port_a": 1, "port_a_sub": 0, "node_b": "Host01", "port_b": 0, "port_b_sub": 0 },
+    { "node_a": "R4", "port_a": 1, "port_a_sub": 0, "node_b": "Host02", "port_b": 0, "port_b_sub": 0 },
+    { "node_a": "R3", "port_a": 1, "port_a_sub": 0, "node_b": "Host03", "port_b": 0, "port_b_sub": 0 },
+    { "node_a": "R5", "port_a": 1, "port_a_sub": 0, "node_b": "Host04", "port_b": 0, "port_b_sub": 0 }
+  ]
+}

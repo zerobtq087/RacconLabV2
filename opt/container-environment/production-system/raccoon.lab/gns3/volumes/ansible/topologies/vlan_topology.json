@@ -1,0 +1,144 @@
+{
+  "project_settings": {
+    "project_name": "RaccoonLAB_VLANs_MultiRouter",
+    "subnet": "192.168.0.0/16",
+    "routing_protocol": "ospf",
+    "ospf_area": 0
+  },
+  "nodes": [
+    {
+      "name": "SW-01",
+      "template": "Ethernet switch",
+      "type": "switch",
+      "x": -600,
+      "y": 0,
+      "vlans": [
+        { "id": 10, "name": "DESKTOP", "ports": [0, 1] },
+        { "id": 20, "name": "MONITORING", "ports": [2, 3] }
+      ]
+    },
+    {
+      "name": "Host01",
+      "template": "HostUbuntu RaccoonLAB",
+      "type": "docker",
+      "x": -750,
+      "y": -150,
+      "subnet_tag": "vlan_10",
+      "vlan": 10,
+      "host_number": 10
+    },
+    {
+      "name": "Host02",
+      "template": "HostUbuntu RaccoonLAB",
+      "type": "docker",
+      "x": -600,
+      "y": -150,
+      "subnet_tag": "vlan_10",
+      "vlan": 10,
+      "host_number": 11
+    },
+    {
+      "name": "Host03",
+      "template": "HostUbuntu RaccoonLAB",
+      "type": "docker",
+      "x": -750,
+      "y": 150,
+      "subnet_tag": "vlan_20",
+      "vlan": 20,
+      "host_number": 10
+    },
+    {
+      "name": "Host04",
+      "template": "HostUbuntu RaccoonLAB",
+      "type": "docker",
+      "x": -600,
+      "y": 150,
+      "subnet_tag": "vlan_20",
+      "vlan": 20,
+      "host_number": 11
+    },
+    {
+      "name": "R1",
+      "template": "Cisco 7200 RaccoonLAB",
+      "type": "cisco",
+      "x": -400,
+      "y": 0,
+      "interfaces": [
+        { "name": "FastEthernet1/0.10", "subnet_tag": "vlan_10", "vlan": 10, "host_number": 1 },
+        { "name": "FastEthernet1/0.20", "subnet_tag": "vlan_20", "vlan": 20, "host_number": 1 },
+        { "name": "Serial2/0", "subnet_tag": "sub_a", "host_number": 1, "mask_bits": 30 }
+      ]
+    },
+    {
+      "name": "R2",
+      "template": "Cisco 7200 RaccoonLAB",
+      "type": "cisco",
+      "x": -200,
+      "y": -100,
+      "interfaces": [
+        { "name": "Serial2/0", "subnet_tag": "sub_a", "host_number": 2, "mask_bits": 30 },
+        { "name": "Serial2/1", "subnet_tag": "sub_b", "host_number": 1, "mask_bits": 30 }
+      ]
+    },
+    {
+      "name": "R3",
+      "template": "Cisco 7200 RaccoonLAB",
+      "type": "cisco",
+      "x": 0,
+      "y": 100,
+      "interfaces": [
+        { "name": "Serial2/1", "subnet_tag": "sub_b", "host_number": 2, "mask_bits": 30 },
+        { "name": "Serial2/0", "subnet_tag": "sub_c", "host_number": 1, "mask_bits": 30 }
+      ]
+    },
+    {
+      "name": "R4",
+      "template": "Cisco 7200 RaccoonLAB",
+      "type": "cisco",
+      "x": 200,
+      "y": 0,
+      "interfaces": [
+        { "name": "Serial2/0", "subnet_tag": "sub_c", "host_number": 2, "mask_bits": 30 },
+        { "name": "FastEthernet1/0", "subnet_tag": "lan_d", "host_number": 1 }
+      ]
+    },
+    {
+      "name": "SW-02",
+      "template": "Ethernet switch",
+      "type": "switch",
+      "x": 400,
+      "y": 0
+    },
+    {
+      "name": "Host05",
+      "template": "HostUbuntu RaccoonLAB",
+      "type": "docker",
+      "x": 550,
+      "y": -80,
+      "subnet_tag": "lan_d",
+      "host_number": 10
+    },
+    {
+      "name": "Host06",
+      "template": "HostUbuntu RaccoonLAB",
+      "type": "docker",
+      "x": 550,
+      "y": 80,
+      "subnet_tag": "lan_d",
+      "host_number": 11
+    }
+  ],
+  "links": [
+    { "node_a": "Host01", "port_a": 0, "node_b": "SW-01", "port_b": 0 },
+    { "node_a": "Host02", "port_a": 0, "node_b": "SW-01", "port_b": 1 },
+    { "node_a": "Host03", "port_a": 0, "node_b": "SW-01", "port_b": 2 },
+    { "node_a": "Host04", "port_a": 0, "node_b": "SW-01", "port_b": 3 },
+    { "node_a": "SW-01", "port_a": 7, "node_b": "R1", "port_b": 1, "port_b_sub": 0 },
+    { "node_a": "R1", "port_a": 2, "port_a_sub": 0, "node_b": "R2", "port_b": 2, "port_b_sub": 0 },
+    { "node_a": "R2", "port_a": 2, "port_a_sub": 1, "node_b": "R3", "port_b": 2, "port_b_sub": 1 },
+    { "node_a": "R3", "port_a": 2, "port_a_sub": 0, "node_b": "R4", "port_b": 2, "port_b_sub": 0 },
+    { "node_a": "R4", "port_a": 1, "port_a_sub": 0, "node_b": "SW-02", "port_b": 7 },
+    { "node_a": "SW-02", "port_a": 0, "node_b": "Host05", "port_b": 0 },
+    { "node_a": "SW-02", "port_a": 1, "node_b": "Host06", "port_b": 0 }
+  ]
+}

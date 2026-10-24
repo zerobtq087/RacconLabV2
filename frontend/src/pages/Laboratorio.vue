@@ -48,47 +48,24 @@
         </template>
 
         <template #text>
+          <v-alert v-if="lab.mensaje" class="mb-4" type="warning" variant="tonal">{{ lab.mensaje }}</v-alert>
+
+          <p class="mb-4 text-medium-emphasis">
+            Abre <strong>GNS3</strong> en tu computadora, ve a <strong>Edit → Preferences → Server</strong>,
+            desactiva <em>Enable local server</em> y escribe estos datos:
+          </p>
+
           <v-row>
-            <v-col cols="12" md="6">
+            <v-col v-for="campo in campos" :key="campo.label" cols="12" :md="campo.md">
               <v-text-field
                 append-inner-icon="mdi-content-copy"
-                label="Dirección de GNS3"
-                :model-value="urlGns3"
+                :hint="campo.hint"
+                :label="campo.label"
+                :model-value="campo.valor"
+                :persistent-hint="!!campo.hint"
                 readonly
                 variant="outlined"
-                @click:append-inner="copiar(urlGns3)"
-              />
-            </v-col>
-            <v-col cols="6" md="3">
-              <v-text-field
-                append-inner-icon="mdi-content-copy"
-                label="Usuario"
-                :model-value="lab.usuario"
-                readonly
-                variant="outlined"
-                @click:append-inner="copiar(lab.usuario)"
-              />
-            </v-col>
-            <v-col cols="6" md="3">
-              <v-text-field
-                append-inner-icon="mdi-content-copy"
-                label="Contraseña"
-                :model-value="lab.token"
-                readonly
-                variant="outlined"
-                @click:append-inner="copiar(lab.token)"
-              />
-            </v-col>
-            <v-col v-if="lab.codigo" cols="12" md="6">
-              <v-text-field
-                append-inner-icon="mdi-content-copy"
-                hint="Compártelo con tu equipo para que se unan"
-                label="Código del equipo"
-                :model-value="lab.codigo"
-                persistent-hint
-                readonly
-                variant="outlined"
-                @click:append-inner="copiar(lab.codigo)"
+                @click:append-inner="copiar(String(campo.valor))"
               />
             </v-col>
             <v-col v-if="!lab.soy_dueno" cols="12" md="6">
@@ -98,7 +75,6 @@
         </template>
 
         <template #actions>
-          <v-btn color="primary" :href="urlGns3" prepend-icon="mdi-open-in-new" target="_blank" text="Abrir GNS3" />
           <v-spacer />
           <v-btn
             color="error"
@@ -191,8 +167,19 @@ const invitado = ref<string | null>(null)
 let timerLab: ReturnType<typeof setTimeout> | undefined
 let timerInv: ReturnType<typeof setInterval> | undefined
 
-// GNS3 se abre en el mismo servidor, en el puerto del laboratorio
-const urlGns3 = computed(() => `http://${window.location.hostname}:${lab.value.puerto}`)
+// Datos para conectar GNS3 de escritorio (el servidor es el mismo de esta página)
+const campos = computed(() => {
+  const lista = [
+    { label: 'Servidor (Host)', valor: window.location.hostname, md: 6, hint: '' },
+    { label: 'Puerto', valor: lab.value.puerto, md: 6, hint: `Consolas de tus equipos: ${lab.value.puerto + 1} en adelante` },
+    { label: 'Usuario', valor: lab.value.usuario, md: 6, hint: '' },
+    { label: 'Contraseña', valor: lab.value.token, md: 6, hint: '' },
+  ]
+  if (lab.value.codigo) {
+    lista.push({ label: 'Código del equipo', valor: lab.value.codigo, md: 12, hint: 'Compártelo con tu equipo para que se unan' })
+  }
+  return lista
+})
 
 function load () {
   clearTimeout(timerLab)
