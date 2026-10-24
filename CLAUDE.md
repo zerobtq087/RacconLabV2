@@ -60,9 +60,22 @@ Carpetas como fiber3: backend/{cmd,config,database,domain,repository,handler,mid
 - Modo equipo: código de 6 letras e invitaciones a compañeros del mismo grupo;
   todos usan el mismo puerto y token. El dueño "limpia" (borra contenedor); un miembro solo sale.
 - Imagen: opt/container-environment/container-images/gns3-workspace/build (Dockerfile + entrypoint.sh).
+  Base fija gns3/gns3-server:2.2.61 + pip gns3-server==2.2.59 (la construcción falla si no da 2.2.59).
+  Parche en el Dockerfile: GNS3 2.2.59 "recarga" nodos Docker con docker restart (quedan sin eth0
+  y la consola no responde); se cambia restart() por stop()+start().
+- Docker interno de cada lab con overlay2 en el volumen `<contenedor>-docker` (/var/lib/docker),
+  respaldo a vfs. Remove borra contenedor + volumen (Limpiar y Monitor). ~830 MB por lab.
 - Ansible: opt/container-environment/production-system/raccoon.lab/gns3/volumes/ansible
-  (deploy_templates.yml al crear el lab, deploy_topology.yml para plantillas), con basic auth.
-- Volúmenes: gns3_images/{IOS,QEMU} y gns3_projects (no se suben a git).
+  (deploy_templates.yml al crear el lab, deploy_topology.yml para plantillas), con basic auth
+  (gns3_user = matrícula, gns3_password = token).
+- Plantillas de GNS3: Cisco 7200 (principal, Dynamips, idlepc 0x606df838, 512 MB), Cisco 3725,
+  QEMU opcionales solo si existe la imagen (IOSv, IOSvL2, CSR1000v, MikroTik) y
+  "Ubuntu RaccoonLAB" (Docker) solo si la imagen está cargada; si no, los hosts son VPCS.
+- Host Ubuntu: gns3_images/Docker/ubuntu-gns3.tar; entrypoint.sh lo carga y lo etiqueta
+  raccoon/ubuntu-host:latest. Si existe gns3_images/Docker/Dockerfile, raccoon.sh construye la
+  imagen y regenera el .tar cuando no coincide (como el original, que la construía en el servidor).
+- Si falta el c7200 o la imagen Ubuntu el lab queda CORRIENDO con un aviso en MENSAJE.
+- Volúmenes: gns3_images/{IOS,QEMU,Docker} y gns3_projects (no se suben a git).
 
 ## Entorno de desarrollo (mi laptop, EndeavourOS, shell fish)
 - Firebird de prueba: `podman` contenedor rl-firebird en 127.0.0.1:3050 (pass dev12345).
@@ -70,21 +83,38 @@ Carpetas como fiber3: backend/{cmd,config,database,domain,repository,handler,mid
 - NO tocar los contenedores Docker del profe: redis-session (6379), firebird5-engine (3051), mysql-server (3306).
 - Correr: `go run ./backend/cmd` (raíz) y `yarn dev` (frontend). El .env local está en ~/raccoon/.env.
 
+## Despliegue en el servidor (raccoon.sh, un solo archivo)
+- El usuario solo pasa raccoon.sh a la VM, lo ejecuta (root) y copia las imágenes. Idempotente.
+- Si viene solo, clona el repo en /opt/raccoon-lab (o git pull) y se re-ejecuta desde ahí;
+  /opt/container-environment es un enlace al opt/ del repo.
+- dnf: EPEL+CRB, podman, podman-compose, docker-ce, cockpit (root habilitado), firewalld, nftables.
+- .env de producción en opt/.../raccoon.lab/.env (secretos aleatorios la primera vez, no se toca después).
+- compose.yml (podman-compose, proyecto raccoon-lab): Firebird 5, Redis, App1, App2 (label=disable
+  por el socket de Docker; GNS3_VOLUMES montado en la misma ruta), AppWeb y Nginx balanceador (80).
+  Imágenes: container-images/raccoon-api y raccoon-web (Dockerfiles, contexto = raíz del repo).
+- Red (aprendido en la VM): NUNCA firewall-cmd --reload con reglas "direct": vacía todo iptables
+  (Docker y netavark). Ahora: reglas rich solo-LAN (ssh/http/cockpit) en runtime+permanente sin
+  reload; filtro solo-LAN de puertos de contenedores en tabla nftables propia `inet raccoon`
+  (prerouting priority raw); reglas DOCKER-USER para 10.89.0.0/16 (Docker pone FORWARD en DROP).
+  Todo eso lo aplica /usr/local/sbin/raccoon-red (drop-in de docker.service + raccoon-red.service).
+- Pasos no críticos avisan y siguen ("FALTA HACER" al final); críticos se detienen.
+- Autoprueba final: página por la IP de la LAN y desde otra red, API por Nginx, imágenes de esta
+  ejecución, DOCKER-USER sin duplicados, filtro nft y consola real de un nodo Ubuntu (y tras recargar).
+
 ## Hecho y probado
-Login con roles y bloqueo, Mi cuenta, Usuarios, Grupos, Importar CSV/XLSX,
-backend de laboratorios, invitaciones y monitor (probado con imagen falsa).
+- Login con roles y bloqueo, Mi cuenta, Usuarios, Grupos, Importar CSV/XLSX.
+- Laboratorios reales (laptop y VM Rocky 9.8): crear, unirse, invitaciones, limpiar, monitor;
+  GNS3 2.2.59 con auth; GNS3 de escritorio conectado por la red; Cisco 7200/3725 y Ubuntu
+  RaccoonLAB arrancan; consolas funcionan (con mate-terminal; xterm en Wayland no deja escribir);
+  Edit config pone la IP; ping entre router y Ubuntu.
+- raccoon.sh probado en la VM Rocky 9.8 (4 vCPU, 8 GB, sin KVM): instala, levanta y se autoprueba.
+- Laboratorio.vue: copiar con respaldo execCommand (http sin HTTPS); el botón cambia a "Copiado" 2 s.
 
 ## Pendiente (en este orden)
-1. Probar laboratorios reales en la laptop: construir gns3-workspace:2.2.59, crear un lab,
-   `curl -u USUARIO:TOKEN http://localhost:30000/v2/version`, conectar GNS3 de escritorio.
-2. Backend de Plantillas: POST /api/plantillas/despliegue (solo PROFESOR, sobre SU laboratorio
-   corriendo) que ejecute deploy_topology.yml dentro del contenedor (el frontend Plantillas.vue ya existe).
-3. Despliegue para Rocky Linux 9: un solo `raccoon.sh` que instale (dnf) podman, podman-compose,
-   docker-ce, cockpit; configure firewalld (22, 80, 9090 y 30000-32399/tcp solo para la red local)
-   y SELinux enforcing (volúmenes :Z, acceso al socket de Docker); genere el .env con contraseñas
-   aleatorias la primera vez; construya imágenes (API Go, AppWeb Nginx, gns3-workspace);
-   levante db-engine (Firebird+Redis), App1/App2 y Nginx balanceador; e imprima IP y admin/contraseña.
-4. Después (no ahora): calculadora de subredes en Go y la IA (Qwen en otra PC por LAN, documentos .md en Firebird).
+1. Backend de Plantillas: POST /api/plantillas/despliegue (solo PROFESOR, sobre SU laboratorio
+   corriendo) que ejecute deploy_topology.yml dentro del contenedor, en segundo plano con avance
+   en Firebird; Plantillas.vue muestra avance y resultado. Preparado para topologías de la IA.
+2. Después (no ahora): calculadora de subredes en Go y la IA (Qwen en otra PC por LAN, documentos .md en Firebird).
 
 ## Proyectos de referencia (solo leer, NUNCA modificar ni copiar su estructura)
 - ~/GoProjects/fiber3 → proyecto del profe. ES EL MODELO a seguir para backend
