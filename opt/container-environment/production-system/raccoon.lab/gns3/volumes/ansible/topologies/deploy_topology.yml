@@ -77,15 +77,21 @@
         method: GET
       register: gns3_templates
 
+    # Los hosts (type: docker) son Ubuntu; si la imagen no se cargó, se usa VPCS
+    - name: Elegir el host de las prácticas (Ubuntu o VPCS)
+      set_fact:
+        host_template: "{{ 'Ubuntu RaccoonLAB' if 'Ubuntu RaccoonLAB' in (gns3_templates.json | map(attribute='name') | list) else 'VPCS' }}"
+
     - name: Instanciar Nodos convencionales (Docker, Dynamips)
       uri:
-        url: "{{ gns3_url }}/v2/projects/{{ project_id }}/templates/{{ gns3_templates.json | selectattr('name', 'equalto', item.template) | map(attribute='template_id') | first }}"
+        url: "{{ gns3_url }}/v2/projects/{{ project_id }}/templates/{{ gns3_templates.json | selectattr('name', 'equalto', (host_template if (item.type | default('')) == 'docker' else item.template)) | map(attribute='template_id') | first }}"
         method: POST
         body_format: json
         body:
           x: "{{ item.x }}"
           y: "{{ item.y }}"
           name: "{{ item.name }}"
+          compute_id: "local" # las plantillas integradas (VPCS) no lo traen
         status_code: [201, 409]
       loop: "{{ lab_design.nodes }}"
       when: 
@@ -228,7 +234,8 @@
               gateway {{ host_gateway }}
               up echo 'nameserver 8.8.8.8' > /etc/resolv.conf
         status_code: [200, 201]
-      vars:
+      # Las mismas cuentas de IP se usan para VPCS (tarea siguiente)
+      vars: &host_vars
         # Mapea VLAN
         vlan_info: "{{ (lab_design.project_settings.vlans | default([]) | selectattr('id', 'equalto', item.vlan | default(0)) | list | first) | default({}) }}"
 
@@ -265,8 +272,25 @@
         host_netmask: "{{ final_subnet | ansible.utils.ipaddr('netmask') }}"
         raw_gateway: "{{ vlan_info.gateway | default(final_subnet | ansible.utils.ipaddr('1')) }}"
         host_gateway: "{{ raw_gateway | ansible.utils.ipaddr('address') if (raw_gateway and (raw_gateway | ansible.utils.ipaddr)) else raw_gateway }}"
+        host_prefix: "{{ final_subnet | ansible.utils.ipaddr('prefix') }}"
       loop: "{{ lab_design.nodes }}"
-      when: item.type is defined and item.type == 'docker'
+      when:
+        - item.type is defined and item.type == 'docker'
+        - host_template == 'Ubuntu RaccoonLAB'
+
+    - name: Configurar IP de los hosts VPCS (si no hay imagen Ubuntu)
+      uri:
+        url: "{{ gns3_url }}/v2/projects/{{ project_id }}/nodes/{{ node_map[item.name] }}/files/startup.vpc"
+        method: POST
+        body: |
+          set pcname {{ item.name }}
+          ip {{ host_ip }}/{{ host_prefix }} {{ host_gateway }}
+        status_code: [200, 201]
+      vars: *host_vars
+      loop: "{{ lab_design.nodes }}"
+      when:
+        - item.type is defined and item.type == 'docker'
+        - host_template == 'VPCS'
 
     - name: Encender todos los nodos de la topología
       uri:

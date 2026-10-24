@@ -262,9 +262,42 @@ function responder (inv: Invitacion, aceptar: boolean) {
     .catch(err => error(err, 'No se pudo responder.'))
 }
 
+// navigator.clipboard solo existe en HTTPS o localhost; la página va por http://IP,
+// así que si no está se usa el método viejo: un textarea oculto + execCommand('copy')
 function copiar (texto: string) {
-  navigator.clipboard.writeText(texto)
-  Swal.fire({ icon: 'success', title: 'Copiado', timer: 800, showConfirmButton: false })
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(texto)
+      .then(() => avisoCopiado(true))
+      .catch(() => avisoCopiado(copiarRespaldo(texto)))
+  } else {
+    avisoCopiado(copiarRespaldo(texto))
+  }
+}
+
+function copiarRespaldo (texto: string): boolean {
+  const area = document.createElement('textarea')
+  area.value = texto
+  area.setAttribute('readonly', '')
+  area.style.position = 'fixed'
+  area.style.opacity = '0'
+  document.body.append(area)
+  area.select()
+  let ok = false
+  try {
+    ok = document.execCommand('copy')
+  } catch {
+    ok = false
+  }
+  area.remove()
+  return ok
+}
+
+function avisoCopiado (ok: boolean) {
+  if (ok) {
+    Swal.fire({ icon: 'success', title: 'Copiado', timer: 800, showConfirmButton: false })
+  } else {
+    Swal.fire({ icon: 'info', title: 'No se pudo copiar', text: 'Selecciónalo y cópialo con Ctrl+C.' })
+  }
 }
 
 onMounted(() => {

@@ -22,6 +22,11 @@ PROYECTO="raccoon-lab"                      # nombre del proyecto en podman-comp
 IMAGEN_C7200="c7200-adventerprisek9-mz.124-24.T5.bin"
 
 LOG="/var/log/raccoon-lab-install.log"
+IMAGEN_UBUNTU="ubuntu-gns3.tar"
+PODMAN_RED="10.89.0.0/16"                   # redes que crea podman-compose (10.89.X.0/24)
+
+# Lo que el usuario todavía tiene que hacer (se muestra en el resumen final)
+PENDIENTES=()
 
 # ---------------------------------------------------------------------
 #  Mensajes
@@ -113,6 +118,17 @@ instalar_paquetes() {
     systemctl enable podman-restart.service
 }
 
+# Cockpit no deja entrar a root por defecto, y en el servidor solo existe root
+configurar_cockpit() {
+    paso "Cockpit"
+    if [[ -f /etc/cockpit/disallowed-users ]] && grep -qx root /etc/cockpit/disallowed-users; then
+        sed -i '/^root$/d' /etc/cockpit/disallowed-users
+        info "root ya puede entrar a Cockpit"
+    else
+        info "root ya tenía permiso en Cockpit"
+    fi
+}
+
 # ---------------------------------------------------------------------
 #  4. SELinux en enforcing
 #     - Firebird, Redis y Nginx montan sus archivos con :Z (etiqueta propia)
@@ -130,8 +146,8 @@ configurar_selinux() {
             info "SELinux cambiado de permissive a enforcing" ;;
         *)
             touch /.autorelabel
-            aviso "SELinux estaba deshabilitado. Ya quedó en enforcing para el próximo arranque:"
-            aviso "reinicia el servidor (reboot) y vuelve a correr raccoon.sh" ;;
+            aviso "SELinux estaba deshabilitado. Ya quedó en enforcing para el próximo arranque"
+            PENDIENTES+=("Reinicia el servidor (reboot) para activar SELinux y vuelve a correr: bash $REPO_DIR/raccoon.sh") ;;
     esac
 }
 
@@ -154,7 +170,8 @@ preparar_carpetas() {
         VISTA="$PROD_DIR"
     fi
 
-    mkdir -p "$GNS3_VOLUMES/gns3_images/IOS" "$GNS3_VOLUMES/gns3_images/QEMU" "$GNS3_VOLUMES/gns3_projects"
+    mkdir -p "$GNS3_VOLUMES/gns3_images/IOS" "$GNS3_VOLUMES/gns3_images/QEMU" \
+        "$GNS3_VOLUMES/gns3_images/Docker" "$GNS3_VOLUMES/gns3_projects"
     info "Volúmenes GNS3: $VISTA/gns3/volumes"
 }
 
@@ -264,6 +281,36 @@ configurar_firewall() {
 }
 
 # ---------------------------------------------------------------------
+#  Docker pone la política FORWARD en DROP y eso descarta el tráfico hacia
+#  la red de Podman (Nginx, App1, App2...): http://IP no cargaba.
+#  Se permite SOLO lo que entra o sale de las redes de Podman ($PODMAN_RED).
+#  Los laboratorios están en la red de Docker, así que siguen limitados a la LAN.
+#
+#  La cadena DOCKER-USER la crea Docker al arrancar, por eso las reglas van en
+#  un "drop-in" de systemd que se ejecuta cada vez que Docker arranca
+#  (también al reiniciar la VM). Con -C se revisa antes de agregar: no se duplican.
+# ---------------------------------------------------------------------
+permitir_podman_en_docker() {
+    paso "Tráfico entre Docker y Podman"
+    local regla_s="iptables -C DOCKER-USER -s $PODMAN_RED -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER -s $PODMAN_RED -j ACCEPT"
+    local regla_d="iptables -C DOCKER-USER -d $PODMAN_RED -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER -d $PODMAN_RED -j ACCEPT"
+
+    mkdir -p /etc/systemd/system/docker.service.d
+    cat > /etc/systemd/system/docker.service.d/raccoon-podman.conf <<EOF
+# Generado por raccoon.sh: deja pasar el tráfico de las redes de Podman ($PODMAN_RED)
+[Service]
+ExecStartPost=/bin/sh -c '$regla_s'
+ExecStartPost=/bin/sh -c '$regla_d'
+EOF
+    systemctl daemon-reload
+
+    # Para la sesión actual (sin reiniciar Docker ni los laboratorios)
+    sh -c "$regla_s"
+    sh -c "$regla_d"
+    info "Permitido el tráfico de $PODMAN_RED (se aplica cada vez que arranca Docker)"
+}
+
+# ---------------------------------------------------------------------
 #  7. Imágenes
 # ---------------------------------------------------------------------
 construir_imagenes() {
@@ -304,7 +351,8 @@ levantar_servicios() {
     if [[ "$codigo" == "401" ]]; then
         info "API respondiendo a través de Nginx"
     else
-        aviso "La API todavía no responde (HTTP $codigo). Revisa: podman logs raccoon-app1"
+        aviso "La API todavía no responde (HTTP $codigo)"
+        PENDIENTES+=("La página no respondió a tiempo. Revisa los errores con: podman logs raccoon-app1")
     fi
 }
 
@@ -312,32 +360,35 @@ levantar_servicios() {
 #  9. Imágenes de routers (no están en git)
 # ---------------------------------------------------------------------
 revisar_imagenes() {
-    paso "Imágenes de routers"
+    paso "Imágenes de routers y hosts"
     local ios="$VISTA/gns3/volumes/gns3_images/IOS"
-    local qemu="$VISTA/gns3/volumes/gns3_images/QEMU"
+    local docker_dir="$VISTA/gns3/volumes/gns3_images/Docker"
 
+    # Router principal (Dynamips)
     if [[ -f "$GNS3_VOLUMES/gns3_images/IOS/$IMAGEN_C7200" ]]; then
-        info "Router principal encontrado: $IMAGEN_C7200"
-        return
-    fi
-
-    if [[ -z "$(ls -A "$GNS3_VOLUMES/gns3_images/IOS")" ]]; then
-        aviso "La carpeta de imágenes IOS está VACÍA: $ios"
+        info "Router c7200: listo"
     else
-        aviso "Falta el router principal $IMAGEN_C7200 en: $ios"
+        if [[ -z "$(ls -A "$GNS3_VOLUMES/gns3_images/IOS")" ]]; then
+            aviso "La carpeta de routers IOS está VACÍA: $ios"
+        else
+            aviso "Falta el router principal $IMAGEN_C7200 en: $ios"
+        fi
+        PENDIENTES+=("Copia los routers desde tu computadora (en la carpeta donde los tengas):
+       scp $IMAGEN_C7200 c3725-adventerprisek9-mz.124-15.T14.image root@$IP:$ios/")
     fi
-    cat <<EOF
-    Los laboratorios funcionan, pero los routers no arrancan sin imágenes.
-    Cópialas desde tu computadora con:
 
-      scp $IMAGEN_C7200 c3725-adventerprisek9-mz.124-15.T14.image \\
-          root@$IP:$ios/
-
-    Opcionales (QEMU, necesitan KVM):
-      scp vios-*.qcow2 viosl2-*.qcow2 csr1000v-*.qcow2 root@$IP:$qemu/
-
-    Los laboratorios que se creen después ya las usan (no hay que reiniciar nada).
-EOF
+    # Host Ubuntu (Docker): si falta, los laboratorios usan VPCS
+    if [[ -f "$GNS3_VOLUMES/gns3_images/Docker/$IMAGEN_UBUNTU" ]]; then
+        info "Host Ubuntu ($IMAGEN_UBUNTU): listo"
+    else
+        if [[ -z "$(ls -A "$GNS3_VOLUMES/gns3_images/Docker")" ]]; then
+            aviso "La carpeta de hosts Docker está VACÍA: $docker_dir"
+        else
+            aviso "Falta $IMAGEN_UBUNTU en: $docker_dir"
+        fi
+        PENDIENTES+=("Copia el host Ubuntu (mientras no esté, los laboratorios usan VPCS):
+       scp $IMAGEN_UBUNTU root@$IP:$docker_dir/")
+    fi
 }
 
 # ---------------------------------------------------------------------
@@ -363,6 +414,25 @@ resumen() {
   Ver servicios   : podman ps   |   Labs: docker ps
 =====================================================================
 EOF
+
+    if [[ ${#PENDIENTES[@]} -eq 0 ]]; then
+        echo -e "\n  \033[1;32mTodo listo.\033[0m Entra a $url con el usuario admin.\n"
+        return
+    fi
+
+    echo -e "\n  \033[1;33mFALTA HACER:\033[0m"
+    local i=1 p
+    for p in "${PENDIENTES[@]}"; do
+        echo "   $i. $p"
+        i=$((i + 1))
+    done
+    cat <<EOF
+
+  Las imágenes se usan en los laboratorios que se creen DESPUÉS de copiarlas
+  (no hay que reiniciar nada; un lab ya abierto se limpia y se vuelve a crear).
+  Opcionales (QEMU, necesitan KVM): copia los .qcow2 a $VISTA/gns3/volumes/gns3_images/QEMU/
+
+EOF
 }
 
 main() {
@@ -374,11 +444,13 @@ main() {
     echo "---- $(date '+%F %T') raccoon.sh desde $REPO_DIR ----"
 
     instalar_paquetes
+    configurar_cockpit
     configurar_selinux
     preparar_carpetas
     detectar_red
     generar_env
     configurar_firewall
+    permitir_podman_en_docker
     construir_imagenes
     levantar_servicios
     revisar_imagenes

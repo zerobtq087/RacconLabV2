@@ -19,7 +19,7 @@
     },
     {
       "name": "Host01",
-      "template": "HostUbuntu RaccoonLAB",
+      "template": "Ubuntu RaccoonLAB",
       "type": "docker",
       "x": -750,
       "y": -150,
@@ -29,7 +29,7 @@
     },
     {
       "name": "Host02",
-      "template": "HostUbuntu RaccoonLAB",
+      "template": "Ubuntu RaccoonLAB",
       "type": "docker",
       "x": -600,
       "y": -150,
@@ -39,7 +39,7 @@
     },
     {
       "name": "Host03",
-      "template": "HostUbuntu RaccoonLAB",
+      "template": "Ubuntu RaccoonLAB",
       "type": "docker",
       "x": -750,
       "y": 150,
@@ -49,7 +49,7 @@
     },
     {
       "name": "Host04",
-      "template": "HostUbuntu RaccoonLAB",
+      "template": "Ubuntu RaccoonLAB",
       "type": "docker",
       "x": -600,
       "y": 150,
@@ -111,7 +111,7 @@
     },
     {
       "name": "Host05",
-      "template": "HostUbuntu RaccoonLAB",
+      "template": "Ubuntu RaccoonLAB",
       "type": "docker",
       "x": 550,
       "y": -80,
@@ -120,7 +120,7 @@
     },
     {
       "name": "Host06",
-      "template": "HostUbuntu RaccoonLAB",
+      "template": "Ubuntu RaccoonLAB",
       "type": "docker",
       "x": 550,
       "y": 80,

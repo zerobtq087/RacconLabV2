@@ -12,6 +12,22 @@ until docker info &>/dev/null; do
     sleep 2
 done
 
+# Host Ubuntu para las prácticas: se carga desde gns3_images/Docker/ubuntu-gns3.tar
+# (no está en git) y se le pone un nombre fijo, sin importar el tag que traiga el .tar.
+# La plantilla de GNS3 y la API de Go usan ese nombre fijo.
+UBUNTU_TAR=/root/GNS3/images/Docker/ubuntu-gns3.tar
+UBUNTU_IMAGE=${UBUNTU_IMAGE:-raccoon/ubuntu-host:latest}
+if [ -f "$UBUNTU_TAR" ] && ! docker image inspect "$UBUNTU_IMAGE" &>/dev/null; then
+    echo "Cargando la imagen Ubuntu desde $UBUNTU_TAR..."
+    if salida=$(docker load -i "$UBUNTU_TAR"); then
+        # docker load responde "Loaded image: nombre:tag" o "Loaded image ID: sha256:..."
+        cargada=$(echo "$salida" | sed -n 's/^Loaded image\( ID\)\?: //p' | head -n 1)
+        docker tag "$cargada" "$UBUNTU_IMAGE" && echo "Imagen Ubuntu lista: $UBUNTU_IMAGE (era $cargada)"
+    else
+        echo "AVISO: no se pudo cargar $UBUNTU_TAR; el laboratorio sigue sin el host Ubuntu"
+    fi
+fi
+
 PORT=${GNS3_PORT:-3080}
 CONSOLE_START=${GNS3_CONSOLE_START:-5000}
 CONSOLE_END=${GNS3_CONSOLE_END:-5039}

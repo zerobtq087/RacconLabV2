@@ -136,7 +136,19 @@
         options: "-nographic"
         usage: "Default credentials: Username 'admin'..."
 
-    # Las PCs de los alumnos son VPCS, que ya viene integrado en GNS3 (no necesita plantilla)
+    # Host de las prácticas: Ubuntu en Docker. entrypoint.sh carga ubuntu-gns3.tar
+    # con este nombre fijo; si no está, las topologías usan VPCS (viene integrado en GNS3)
+    ubuntu_image: "raccoon/ubuntu-host:latest"
+    ubuntu_template:
+      name: "Ubuntu RaccoonLAB"
+      compute_id: "local"
+      template_type: "docker"
+      image: "raccoon/ubuntu-host:latest"
+      category: "guest"
+      console_type: "telnet"
+      adapters: 1
+      symbol: ":/symbols/classic/computer.svg"
+      usage: "Host Ubuntu con herramientas de red (ssh, nmap, apache2, bind9...)"
 
   tasks:
     - name: Esperar a que el servidor interno de GNS3 levante (Puerto Dinámico)
@@ -162,6 +174,17 @@
       loop_control:
         label: "{{ item.item.name }}"
       when: item.stat.exists
+
+    - name: Revisar si la imagen Ubuntu está cargada en el Docker interno
+      ansible.builtin.command: docker image inspect {{ ubuntu_image }}
+      register: imagen_ubuntu
+      changed_when: false
+      failed_when: false
+
+    - name: Agregar la plantilla Ubuntu solo si la imagen existe
+      ansible.builtin.set_fact:
+        templates: "{{ templates + [ubuntu_template] }}"
+      when: imagen_ubuntu.rc == 0
 
     - name: Obtener lista de templates actuales en el contenedor del alumno
       uri:

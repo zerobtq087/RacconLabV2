@@ -64,6 +64,7 @@ func (s *Laboratorios) levantar(lab *domain.Laboratorio) {
 		Binds: []string{
 			vol + "/gns3_images/QEMU:/root/GNS3/images/QEMU:ro",
 			vol + "/gns3_images/IOS:/root/GNS3/images/IOS:ro",
+			vol + "/gns3_images/Docker:/root/GNS3/images/Docker:ro",           // ubuntu-gns3.tar (host de las prácticas)
 			vol + "/gns3_projects/" + lab.Contenedor + ":/root/GNS3/projects", // los proyectos sobreviven a la limpieza
 			vol + "/ansible:/root/ansible:ro",
 		},
@@ -106,7 +107,7 @@ func (s *Laboratorios) esperarGNS3(ctx context.Context, lab *domain.Laboratorio)
 	url := fmt.Sprintf("http://%s:%d/v2/version", s.env.GNS3Host, lab.PuertoBase)
 	cli := &http.Client{Timeout: 3 * time.Second}
 
-	for range 90 { // hasta ~3 minutos
+	for range 150 { // hasta ~5 minutos (antes de GNS3 se carga la imagen Ubuntu)
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		req.SetBasicAuth(lab.Usuario, lab.Token)
 		if resp, err := cli.Do(req); err == nil {
@@ -145,19 +146,31 @@ func (s *Laboratorios) cargarPlantillas(ctx context.Context, lab *domain.Laborat
 	return ""
 }
 
-// imagenPrincipal: el router c7200 (Dynamips) de las plantillas
-const imagenPrincipal = "/root/GNS3/images/IOS/c7200-adventerprisek9-mz.124-24.T5.bin"
+const (
+	// imagenPrincipal: el router c7200 (Dynamips) de las plantillas
+	imagenPrincipal = "/root/GNS3/images/IOS/c7200-adventerprisek9-mz.124-24.T5.bin"
+	// imagenUbuntu: host de las prácticas; entrypoint.sh la carga de gns3_images/Docker/ubuntu-gns3.tar
+	imagenUbuntu = "raccoon/ubuntu-host:latest"
+)
 
-// revisarImagenes ve DENTRO del contenedor si está la imagen del router principal
+// revisarImagenes ve DENTRO del contenedor si están el router principal y el host Ubuntu
 // (la API puede correr en otro contenedor y no ver gns3_images del host).
-// Si falta, el laboratorio sigue vivo y solo se avisa.
+// Si falta alguna, el laboratorio sigue vivo y solo se avisa.
 func (s *Laboratorios) revisarImagenes(ctx context.Context, lab *domain.Laboratorio) string {
-	_, codigo, err := s.docker.Exec(ctx, lab.Contenedor, []string{"test", "-f", imagenPrincipal})
-	if err != nil || codigo != 0 {
-		log.Printf("[LABS] %s: falta %s", lab.Contenedor, imagenPrincipal)
-		return "Faltan imágenes de routers en gns3_images/IOS; avisa al administrador"
+	var faltan []string
+
+	if _, codigo, err := s.docker.Exec(ctx, lab.Contenedor, []string{"test", "-f", imagenPrincipal}); err != nil || codigo != 0 {
+		faltan = append(faltan, "router c7200 en gns3_images/IOS")
 	}
-	return ""
+	if _, codigo, err := s.docker.Exec(ctx, lab.Contenedor, []string{"docker", "image", "inspect", imagenUbuntu}); err != nil || codigo != 0 {
+		faltan = append(faltan, "host Ubuntu en gns3_images/Docker (se usará VPCS)")
+	}
+
+	if len(faltan) == 0 {
+		return ""
+	}
+	log.Printf("[LABS] %s: faltan imágenes: %s", lab.Contenedor, strings.Join(faltan, "; "))
+	return "Faltan imágenes: " + strings.Join(faltan, " y ") + "; avisa al administrador"
 }
 
 // Status: el laboratorio del usuario (dueño o miembro)
