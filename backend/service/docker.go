@@ -104,6 +104,12 @@ func (d *Docker) Create(ctx context.Context, c *Contenedor) error {
 		"Binds":         c.Binds,
 		"RestartPolicy": map[string]string{"Name": "unless-stopped"},
 		"PortBindings":  publicados,
+		// El Docker interno guarda sus imágenes en un volumen propio del lab:
+		// así puede usar overlay2 (sobre la capa del contenedor solo funciona vfs,
+		// que copia la imagen completa por cada capa y cada nodo)
+		"Mounts": []map[string]string{
+			{"Type": "volume", "Source": volumenDocker(c.Nombre), "Target": "/var/lib/docker"},
+		},
 	}
 	if c.ConKVM {
 		hostConfig["Devices"] = []map[string]string{
@@ -132,9 +138,22 @@ func (d *Docker) Create(ctx context.Context, c *Contenedor) error {
 	return nil
 }
 
-// Remove detiene y borra el contenedor (si no existe, no es error)
+// volumenDocker: nombre del volumen con el Docker interno del laboratorio
+func volumenDocker(contenedor string) string {
+	return contenedor + "-docker"
+}
+
+// Remove detiene y borra el contenedor y su volumen del Docker interno
+// (si no existen, no es error)
 func (d *Docker) Remove(ctx context.Context, nombre string) error {
 	codigo, err := d.peticion(ctx, http.MethodDelete, "/containers/"+url.PathEscape(nombre)+"?force=true&v=true", nil, nil)
+	if err != nil && codigo != http.StatusNotFound {
+		return err
+	}
+
+	// El volumen se borra aparte (con nombre no se va con v=true); también limpia
+	// el de un laboratorio cuyo contenedor ya no existía
+	codigo, err = d.peticion(ctx, http.MethodDelete, "/volumes/"+url.PathEscape(volumenDocker(nombre))+"?force=true", nil, nil)
 	if codigo == http.StatusNotFound {
 		return nil
 	}

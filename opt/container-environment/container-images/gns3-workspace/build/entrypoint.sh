@@ -3,14 +3,29 @@
 # Las variables las manda la API de Go al crear el contenedor
 set -e
 
-# Docker interno (para nodos Docker dentro de GNS3)
-echo "Iniciando Docker interno..."
-rm -f /var/run/docker.pid 2>/dev/null || true
-dockerd --host=unix:///var/run/docker.sock --storage-driver=vfs --log-level=error &
-until docker info &>/dev/null; do
-    echo "Esperando Docker..."
-    sleep 2
-done
+# Docker interno (para nodos Docker dentro de GNS3).
+# overlay2 comparte las capas de la imagen entre nodos, pero necesita que
+# /var/lib/docker sea un volumen (la API de Go lo crea). Si no se puede, vfs.
+iniciar_dockerd() {
+    rm -f /var/run/docker.pid
+    dockerd --host=unix:///var/run/docker.sock --storage-driver="$1" --log-level=error &
+    DOCKERD_PID=$!
+    for _ in $(seq 30); do
+        docker info &>/dev/null && return 0
+        kill -0 "$DOCKERD_PID" 2>/dev/null || return 1   # dockerd terminó con error
+        sleep 1
+    done
+    return 1
+}
+
+echo "Iniciando Docker interno (overlay2)..."
+if ! iniciar_dockerd overlay2; then
+    echo "AVISO: overlay2 no funcionó aquí; se usa vfs (ocupa más disco)"
+    kill "$DOCKERD_PID" 2>/dev/null || true
+    wait "$DOCKERD_PID" 2>/dev/null || true
+    iniciar_dockerd vfs || { echo "ERROR: no arrancó el Docker interno"; exit 1; }
+fi
+echo "Docker interno listo con $(docker info --format '{{.Driver}}')"
 
 # Host Ubuntu para las prácticas: se carga desde gns3_images/Docker/ubuntu-gns3.tar
 # (no está en git) y se le pone un nombre fijo, sin importar el tag que traiga el .tar.

@@ -20,3 +20,6 @@ frontend/.yarn/cache/
 # Imágenes de routers y proyectos de los alumnos (pesan mucho)
 opt/container-environment/production-system/raccoon.lab/gns3/volumes/gns3_images/
 opt/container-environment/production-system/raccoon.lab/gns3/volumes/gns3_projects/
+
+# Configuración local de Claude Code
+.claude/
