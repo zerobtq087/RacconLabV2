@@ -14,6 +14,17 @@ RUN pip uninstall -y gns3-server --break-system-packages && \
         netaddr==1.3.0 \
         netmiko==4.8.0
 
+# Arreglo de GNS3 2.2.59: al "Recargar" (Reload) un nodo Docker solo hace
+# "docker restart": el contenedor arranca en una red nueva sin eth0, el init de
+# GNS3 se queda esperando la interfaz y la consola no responde (pasa al aplicar
+# Edit config). Se cambia por detener + arrancar, que sí conecta la red y la
+# consola. Si el código de GNS3 cambia, la construcción falla aquí.
+RUN F=$(cd / && python3 -c 'import gns3server.compute.docker.docker_vm as m; print(m.__file__)') && \
+    grep -q 'await self.manager.query("POST", "containers/{}/restart".format(self._cid))' "$F" && \
+    sed -i 's|^\(\s*\)await self.manager.query("POST", "containers/{}/restart".format(self._cid))$|\1await self.stop()\n\1await self.start()|' "$F" && \
+    ! grep -q 'containers/{}/restart' "$F" && \
+    grep -A8 'async def restart' "$F" | grep -q 'await self.stop()'
+
 RUN chmod +x /usr/bin/ubridge && chmod +s /usr/bin/ubridge
 
 # Install dependences

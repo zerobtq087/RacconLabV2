@@ -480,6 +480,74 @@ construir_imagenes() {
     podman image prune -f >/dev/null || true
 }
 
+# leer_tar ARCHIVO: dice qué imagen(es) trae un .tar de "docker save" sin cargarlo.
+# Imprime líneas clave=valor: imagenes, cmd, entrypoint y capas (de la primera imagen)
+leer_tar() {
+    python3 -I - "$1" <<'EOF'
+import json, sys, tarfile
+with tarfile.open(sys.argv[1]) as t:
+    manifiesto = json.load(t.extractfile("manifest.json"))
+    conf = json.load(t.extractfile(manifiesto[0]["Config"]))
+tags = [",".join(m.get("RepoTags") or ["(sin nombre)"]) for m in manifiesto]
+c = conf.get("config") or {}
+print("imagenes=" + " ".join(tags))
+print("cmd=" + json.dumps(c.get("Cmd")))
+print("entrypoint=" + json.dumps(c.get("Entrypoint")))
+print("capas=" + ",".join(conf.get("rootfs", {}).get("diff_ids", [])))
+EOF
+}
+
+# ---------------------------------------------------------------------
+#  Host Ubuntu de las prácticas (gns3_images/Docker, no está en git)
+#  Como en el proyecto original, la imagen se construye en el servidor desde
+#  su Dockerfile: si gns3_images/Docker/Dockerfile existe, se construye y se
+#  regenera ubuntu-gns3.tar cuando no corresponde (el anterior se guarda).
+# ---------------------------------------------------------------------
+preparar_host_ubuntu() {
+    paso "Host Ubuntu de las prácticas"
+    local dir="$GNS3_VOLUMES/gns3_images/Docker" vista="$VISTA/gns3/volumes/gns3_images/Docker"
+    local tar="$dir/$IMAGEN_UBUNTU" ctx capas_img capas_tar="" info_tar r=0
+
+    if [[ -f "$dir/Dockerfile" ]]; then
+        info "Construyendo la imagen desde $vista/Dockerfile"
+        # Contexto vacío: así no se manda el .tar (cientos de MB) al build
+        ctx=$(mktemp -d)
+        if docker build -q -t raccoon/ubuntu-host:latest -f "$dir/Dockerfile" "$ctx" >/dev/null 2>"$ctx.log" \
+            || { cat "$ctx.log" >&2; false; }; then
+            capas_img=$(docker image inspect -f '{{join .RootFS.Layers ","}}' raccoon/ubuntu-host:latest)
+            [[ -f "$tar" ]] && capas_tar=$(leer_tar "$tar" 2>/dev/null | sed -n 's/^capas=//p')
+            if [[ "$capas_img" == "$capas_tar" ]]; then
+                bien "$IMAGEN_UBUNTU ya corresponde al Dockerfile"
+            else
+                if [[ -f "$tar" ]]; then
+                    mv -f "$tar" "$tar.anterior"
+                    aviso "El $IMAGEN_UBUNTU que había NO venía de ese Dockerfile; se guardó como $IMAGEN_UBUNTU.anterior"
+                fi
+                docker save -o "$tar" raccoon/ubuntu-host:latest && chmod 644 "$tar" \
+                    && bien "Se generó $IMAGEN_UBUNTU desde el Dockerfile" || r=1
+            fi
+        else
+            aviso "No se pudo construir la imagen desde $vista/Dockerfile; se usa el .tar que haya"
+            r=1
+        fi
+        rm -rf "$ctx" "$ctx.log"
+    fi
+
+    # Qué trae el .tar (para que no haya sorpresas)
+    if [[ -f "$tar" ]]; then
+        if info_tar=$(leer_tar "$tar" 2>/dev/null); then
+            info "$IMAGEN_UBUNTU trae: $(sed -n 's/^imagenes=//p' <<< "$info_tar")"
+            info "  arranca con: CMD=$(sed -n 's/^cmd=//p' <<< "$info_tar") ENTRYPOINT=$(sed -n 's/^entrypoint=//p' <<< "$info_tar")"
+            [[ $(sed -n 's/^imagenes=//p' <<< "$info_tar" | wc -w) -gt 1 ]] \
+                && aviso "$IMAGEN_UBUNTU trae varias imágenes; los labs usan la que se llame ubuntu-gns3 (o la primera)"
+        else
+            aviso "$IMAGEN_UBUNTU no parece un 'docker save' válido"
+            pendiente "Vuelve a generar el host Ubuntu: copia su Dockerfile a $vista/ y corre de nuevo raccoon.sh"
+        fi
+    fi
+    return $r
+}
+
 # Labs que siguen corriendo con una imagen anterior de gns3-workspace
 avisar_labs_viejos() {
     local viejos=() nombre imagen
@@ -632,6 +700,133 @@ autoprueba() {
 }
 
 # ---------------------------------------------------------------------
+#  Autoprueba de la consola del host Ubuntu: un lab temporal (solo en
+#  127.0.0.1, en el último bloque de puertos) crea un nodo "Ubuntu RaccoonLAB",
+#  abre su consola por telnet y escribe "echo prueba"; después lo recarga
+#  (como tras Edit config) y vuelve a probar. Al final borra todo.
+# ---------------------------------------------------------------------
+probar_consola_ubuntu() {
+    paso "Autoprueba de la consola del host Ubuntu"
+    local nombre="rl-autoprueba" usuario="autoprueba" token base i r=0 resultado
+    base=$((LAB_FIN - LAB_PUERTOS + 1))
+
+    if [[ ! -f "$GNS3_VOLUMES/gns3_images/Docker/$IMAGEN_UBUNTU" ]]; then
+        info "No hay $IMAGEN_UBUNTU: se omite"
+        return 0
+    fi
+    if ss -ltn | grep -q ":$base "; then
+        info "El puerto $base lo usa un laboratorio: se omite"
+        return 0
+    fi
+
+    token=$(secreto 8)
+    docker rm -f "$nombre" >/dev/null 2>&1 || true
+    docker volume rm -f "$nombre-docker" >/dev/null 2>&1 || true
+    docker run -d --name "$nombre" --privileged \
+        -p "127.0.0.1:$base-$((base + 3)):$base-$((base + 3))" \
+        -e GNS3_PORT="$base" -e GNS3_CONSOLE_START=$((base + 1)) -e GNS3_CONSOLE_END=$((base + 3)) \
+        -e GNS3_USER="$usuario" -e GNS3_PASSWORD="$token" \
+        -v "$GNS3_VOLUMES/gns3_images/Docker:/root/GNS3/images/Docker:ro" \
+        -v "$GNS3_VOLUMES/ansible:/root/ansible:ro" \
+        --mount "type=volume,src=$nombre-docker,dst=/var/lib/docker" \
+        "$GNS3_WORKSPACE_IMAGE" >/dev/null || return 1
+
+    info "Esperando al GNS3 de prueba (carga la imagen Ubuntu)..."
+    for ((i = 0; i < 150; i++)); do
+        [[ "$(curl -s -o /dev/null -w '%{http_code}' -u "$usuario:$token" "http://127.0.0.1:$base/v2/version" || true)" == "200" ]] && break
+        sleep 2
+    done
+
+    # Plantillas igual que la API de Go al crear un lab
+    docker exec "$nombre" ansible-playbook -i 127.0.0.1, -c local /root/ansible/global/deploy_templates.yml \
+        -e "gns3_url=http://127.0.0.1:$base" -e "gns3_user=$usuario" -e "gns3_password=$token" \
+        -e target_host=127.0.0.1 >/dev/null 2>&1 || r=1
+
+    resultado=$(python3 -I - "$base" "$usuario" "$token" 2>&1 <<'EOF'
+import base64, json, socket, sys, time, urllib.request
+
+base, usuario, token = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+URL = f"http://127.0.0.1:{base}/v2"
+AUTH = "Basic " + base64.b64encode(f"{usuario}:{token}".encode()).decode()
+
+def api(metodo, ruta, datos=None):
+    cuerpo = None if datos is None else json.dumps(datos).encode()
+    req = urllib.request.Request(URL + ruta, data=cuerpo, method=metodo, headers={"Authorization": AUTH})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        txt = r.read()
+        return json.loads(txt) if txt else None
+
+def leer(s, segundos):
+    # Lee y contesta la negociación telnet (como un cliente telnet normal)
+    fin, out = time.time() + segundos, b""
+    s.settimeout(0.3)
+    while time.time() < fin:
+        try:
+            d = s.recv(65536)
+        except socket.timeout:
+            continue
+        if not d:
+            break
+        i = 0
+        while i < len(d):
+            if d[i] == 255 and i + 2 < len(d) and d[i + 1] in (251, 252, 253, 254):
+                cmd, opt = d[i + 1], d[i + 2]
+                if cmd == 251:
+                    s.sendall(bytes([255, 253 if opt in (1, 3) else 254, opt]))
+                elif cmd == 253:
+                    s.sendall(bytes([255, 252, opt]))
+                i += 3
+                continue
+            out += d[i:i + 1]
+            i += 1
+    return out.decode(errors="ignore")
+
+def consola(puerto):
+    try:
+        s = socket.create_connection(("127.0.0.1", puerto), 5)
+        leer(s, 2)
+        s.sendall(b"\r\n")
+        leer(s, 1)
+        s.sendall(b"echo prueba-consola\r\n")
+        salida = leer(s, 3)
+        s.close()
+        return "prueba-consola" in salida.replace("echo prueba-consola", "")
+    except OSError:
+        return False
+
+plantilla = [t for t in api("GET", "/templates") if t["name"] == "Ubuntu RaccoonLAB"]
+if not plantilla:
+    print("no se registró la plantilla 'Ubuntu RaccoonLAB'")
+    sys.exit(1)
+proyecto = api("POST", "/projects", {"name": "autoprueba"})["project_id"]
+try:
+    nodo = api("POST", f"/projects/{proyecto}/templates/{plantilla[0]['template_id']}", {"x": 0, "y": 0, "compute_id": "local"})
+    api("POST", f"/projects/{proyecto}/nodes/{nodo['node_id']}/start", {})
+    time.sleep(3)
+    escribe = consola(nodo["console"])
+    api("POST", f"/projects/{proyecto}/nodes/{nodo['node_id']}/reload", {})
+    time.sleep(4)
+    tras_recargar = consola(nodo["console"])
+finally:
+    api("DELETE", f"/projects/{proyecto}")
+print(f"escribir={'si' if escribe else 'NO'} tras_recargar={'si' if tras_recargar else 'NO'}")
+sys.exit(0 if escribe and tras_recargar else 1)
+EOF
+    ) || r=1
+
+    docker rm -f "$nombre" >/dev/null 2>&1 || true
+    docker volume rm -f "$nombre-docker" >/dev/null 2>&1 || true
+
+    if [[ $r -eq 0 ]]; then
+        bien "La consola del host Ubuntu acepta lo que se escribe (también tras recargar el nodo)"
+    else
+        aviso "La consola del host Ubuntu falló: ${resultado:-sin respuesta}"
+        pendiente "La consola del host Ubuntu no funciona (${resultado:-sin respuesta}). Pasa a soporte: docker logs de un lab y la salida de este script"
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------
 #  12. Resumen
 # ---------------------------------------------------------------------
 resumen() {
@@ -698,12 +893,14 @@ main() {
 
     # Críticos
     construir_imagenes
+    no_critico preparar_host_ubuntu "Revisa el host Ubuntu en $VISTA/gns3/volumes/gns3_images/Docker (Dockerfile y $IMAGEN_UBUNTU)"
     no_critico avisar_labs_viejos "Revisa qué laboratorios usan la imagen anterior: docker ps"
     levantar_servicios
 
     # Revisión final
     revisar_imagenes
     no_critico autoprueba "La autoprueba no terminó: revisa la bitácora $LOG"
+    no_critico probar_consola_ubuntu "La prueba de la consola Ubuntu no terminó: revisa la bitácora $LOG"
     resumen
 }
 

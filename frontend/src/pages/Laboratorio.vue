@@ -58,15 +58,26 @@
           <v-row>
             <v-col v-for="campo in campos" :key="campo.label" cols="12" :md="campo.md">
               <v-text-field
-                append-inner-icon="mdi-content-copy"
                 :hint="campo.hint"
                 :label="campo.label"
                 :model-value="campo.valor"
                 :persistent-hint="!!campo.hint"
                 readonly
                 variant="outlined"
-                @click:append-inner="copiar(String(campo.valor))"
-              />
+              >
+                <!-- Al copiar, el botón muestra una palomita y "Copiado" durante 2 s -->
+                <template #append-inner>
+                  <v-btn
+                    :color="copiado == campo.label ? 'success' : undefined"
+                    density="comfortable"
+                    :prepend-icon="copiado == campo.label ? 'mdi-check' : 'mdi-content-copy'"
+                    size="small"
+                    :text="copiado == campo.label ? 'Copiado' : 'Copiar'"
+                    variant="text"
+                    @click="copiar(campo.label, String(campo.valor))"
+                  />
+                </template>
+              </v-text-field>
             </v-col>
             <v-col v-if="!lab.soy_dueno" cols="12" md="6">
               <v-text-field label="Dueño" :model-value="lab.dueno" readonly variant="outlined" />
@@ -164,7 +175,10 @@ const procesando = ref(false)
 const dialogInvitar = ref(false)
 const invitado = ref<string | null>(null)
 
+const copiado = ref('')   // campo que se acaba de copiar (su botón dice "Copiado")
+
 let timerLab: ReturnType<typeof setTimeout> | undefined
+let timerCopiado: ReturnType<typeof setTimeout> | undefined
 let timerInv: ReturnType<typeof setInterval> | undefined
 
 // Datos para conectar GNS3 de escritorio (el servidor es el mismo de esta página)
@@ -264,13 +278,13 @@ function responder (inv: Invitacion, aceptar: boolean) {
 
 // navigator.clipboard solo existe en HTTPS o localhost; la página va por http://IP,
 // así que si no está se usa el método viejo: un textarea oculto + execCommand('copy')
-function copiar (texto: string) {
+function copiar (campo: string, texto: string) {
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(texto)
-      .then(() => avisoCopiado(true))
-      .catch(() => avisoCopiado(copiarRespaldo(texto)))
-  } else {
-    avisoCopiado(copiarRespaldo(texto))
+      .then(() => marcarCopiado(campo))
+      .catch(() => copiarRespaldo(texto) && marcarCopiado(campo))
+  } else if (copiarRespaldo(texto)) {
+    marcarCopiado(campo)
   }
 }
 
@@ -292,12 +306,11 @@ function copiarRespaldo (texto: string): boolean {
   return ok
 }
 
-function avisoCopiado (ok: boolean) {
-  if (ok) {
-    Swal.fire({ icon: 'success', title: 'Copiado', timer: 800, showConfirmButton: false })
-  } else {
-    Swal.fire({ icon: 'info', title: 'No se pudo copiar', text: 'Selecciónalo y cópialo con Ctrl+C.' })
-  }
+// El botón del campo dice "Copiado" y a los 2 segundos vuelve a la normalidad
+function marcarCopiado (campo: string) {
+  copiado.value = campo
+  clearTimeout(timerCopiado)
+  timerCopiado = setTimeout(() => copiado.value = '', 2000)
 }
 
 onMounted(() => {
@@ -308,6 +321,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearTimeout(timerLab)
+  clearTimeout(timerCopiado)
   clearInterval(timerInv)
 })
 </script>

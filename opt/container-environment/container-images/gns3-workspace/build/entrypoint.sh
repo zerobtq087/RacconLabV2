@@ -36,8 +36,16 @@ if [ -f "$UBUNTU_TAR" ] && ! docker image inspect "$UBUNTU_IMAGE" &>/dev/null; t
     echo "Cargando la imagen Ubuntu desde $UBUNTU_TAR..."
     if salida=$(docker load -i "$UBUNTU_TAR"); then
         # docker load responde "Loaded image: nombre:tag" o "Loaded image ID: sha256:..."
-        cargada=$(echo "$salida" | sed -n 's/^Loaded image\( ID\)\?: //p' | head -n 1)
+        # (una línea por imagen). Si el .tar trae varias, se prefiere la que se llame
+        # ubuntu-gns3; si no, la primera. Se avisa para que no haya sorpresas.
+        imagenes=$(echo "$salida" | sed -n 's/^Loaded image\( ID\)\?: //p')
+        cargada=$(echo "$imagenes" | grep -m1 'ubuntu-gns3' || echo "$imagenes" | head -n 1)
+        if [ "$(echo "$imagenes" | wc -l)" -gt 1 ]; then
+            echo "AVISO: el .tar trae varias imágenes: $(echo "$imagenes" | tr '\n' ' ')"
+        fi
+        # docker tag solo agrega un nombre: CMD y ENTRYPOINT quedan como en la imagen
         docker tag "$cargada" "$UBUNTU_IMAGE" && echo "Imagen Ubuntu lista: $UBUNTU_IMAGE (era $cargada)"
+        echo "  arranca con: $(docker image inspect -f 'CMD={{json .Config.Cmd}} ENTRYPOINT={{json .Config.Entrypoint}}' "$UBUNTU_IMAGE")"
     else
         echo "AVISO: no se pudo cargar $UBUNTU_TAR; el laboratorio sigue sin el host Ubuntu"
     fi
