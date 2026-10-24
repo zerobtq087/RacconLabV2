@@ -1,0 +1,11 @@
+# Lo que NO se manda a podman build (la construcción usa la raíz del repo)
+.git
+.env
+**/.env
+frontend/node_modules
+frontend/dist
+frontend/.yarn/cache
+frontend/.yarn/install-state.gz
+# Imágenes de routers y proyectos de los alumnos (pesan GB)
+opt/container-environment/production-system/raccoon.lab/gns3/volumes/gns3_images
+opt/container-environment/production-system/raccoon.lab/gns3/volumes/gns3_projects
