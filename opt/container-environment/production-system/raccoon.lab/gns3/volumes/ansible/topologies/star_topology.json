@@ -20,7 +20,7 @@
       "x": -250,
       "y": 150,
       "interfaces": [
-        { "name": "GigabitEthernet1/0", "subnet_tag": "lan_e", "host_number": 1 },
+        { "name": "FastEthernet1/0", "subnet_tag": "lan_e", "host_number": 1 },
         { "name": "Serial2/0",          "subnet_tag": "link_a", "host_number": 2 }
       ]
     },
@@ -31,7 +31,7 @@
       "x": 250,
       "y": -100,
       "interfaces": [
-        { "name": "GigabitEthernet1/0", "subnet_tag": "lan_g", "host_number": 1 },
+        { "name": "FastEthernet1/0", "subnet_tag": "lan_g", "host_number": 1 },
         { "name": "Serial2/1",          "subnet_tag": "link_b", "host_number": 2 }
       ]
     },
@@ -42,7 +42,7 @@
       "x": -200,
       "y": -200,
       "interfaces": [
-        { "name": "GigabitEthernet1/0", "subnet_tag": "lan_f", "host_number": 1 },
+        { "name": "FastEthernet1/0", "subnet_tag": "lan_f", "host_number": 1 },
         { "name": "Serial2/2",          "subnet_tag": "link_c", "host_number": 2 }
       ]
     },
@@ -53,7 +53,7 @@
       "x": 200,
       "y": 200,
       "interfaces": [
-        { "name": "GigabitEthernet1/0", "subnet_tag": "lan_h", "host_number": 1 },
+        { "name": "FastEthernet1/0", "subnet_tag": "lan_h", "host_number": 1 },
         { "name": "Serial2/3",          "subnet_tag": "link_d", "host_number": 2 }
       ]
     },

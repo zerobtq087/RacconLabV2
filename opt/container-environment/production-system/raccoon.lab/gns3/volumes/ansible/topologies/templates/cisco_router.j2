@@ -1,3 +1,12 @@
+{# =====================================================================
+   Configuración de un router Cisco (se carga como startup-config).
+   "item" es el router del JSON ya resuelto por Go:
+     item.interfaces[] → name, ip, netmask, vlan (subinterfaz dot1Q)
+     item.parents[]    → interfaces físicas que hay que encender (subinterfaces)
+     item.networks[]   → redes conectadas, para RIP/OSPF
+   lab_design.project_settings → routing_protocol (rip | ospf) y ospf_area
+   ===================================================================== #}
+{% set ajustes = lab_design.project_settings %}
 !
 version 12.4
 service timestamps debug datetime msec
@@ -6,27 +15,45 @@ no service password-encryption
 !
 hostname {{ item.name }}
 !
-boot-start-marker
-boot-end-marker
+banner motd $ RaccoonLAB - Emulador de Redes para Media Superior y Superior - UTTT $
+no ip domain lookup
+ip routing
 !
-interface FastEthernet0/0
- ip address {{ router_ip }} {{ netmask }}
+{% for padre in item.parents | default([]) %}
+interface {{ padre }}
+ no ip address
  no shutdown
-exit
 !
-{% if routing_protocol == 'ospf' %}
+{% endfor %}
+{% for iface in item.interfaces | default([]) %}
+interface {{ iface.name }}
+{% if iface.vlan | default(0) %}
+ encapsulation dot1Q {{ iface.vlan }}
+{% endif %}
+{% if iface.ip | default('') %}
+ ip address {{ iface.ip }} {{ iface.netmask }}
+{% endif %}
+ no shutdown
+!
+{% endfor %}
+{% if ajustes.routing_protocol == 'ospf' %}
 router ospf 1
  log-adjacency-changes
- network {{ network_address }} {{ wildcard }} area {{ ospf_area | default(0) }}
-exit
+{% for red in item.networks | default([]) %}
+ network {{ red.network }} {{ red.wildcard }} area {{ ajustes.ospf_area }}
+{% endfor %}
 !
-{% elif routing_protocol == 'rip' %}
+{% elif ajustes.routing_protocol == 'rip' %}
 router rip
  version 2
- network {{ network_address }}
  no auto-summary
-exit
+{% for red in item.networks | default([]) %}
+ network {{ red.network }}
+{% endfor %}
 !
 {% endif %}
+line con 0
+ exec-timeout 0 0
+ logging synchronous
 !
 end

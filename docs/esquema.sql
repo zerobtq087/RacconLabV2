@@ -151,6 +151,34 @@ CREATE TABLE INVITACIONES (
 );
 
 -- ---------------------------------------------------------------------
+--  DESPLIEGUES DE TOPOLOGÍAS (Plantillas del profesor; después, la IA)
+--  Corren en segundo plano: aquí se guarda el avance y el resultado.
+--  LAB_ACTIVO = ID_LABORATORIO mientras está PROCESANDO y NULL al terminar:
+--  su UNIQUE impide 2 despliegues a la vez en el mismo lab, aunque haya
+--  2 réplicas de la API (Firebird permite varios NULL en un UNIQUE).
+-- ---------------------------------------------------------------------
+CREATE TABLE ESTADOS_DESPLIEGUE (
+    CLAVE        VARCHAR(12)  NOT NULL PRIMARY KEY,   -- PROCESANDO, TERMINADO, ERROR
+    DESCRIPCION  VARCHAR(40)  NOT NULL
+);
+
+CREATE TABLE DESPLIEGUES (
+    ID              CHAR(16) CHARACTER SET OCTETS  NOT NULL PRIMARY KEY,
+    ID_LABORATORIO  CHAR(16) CHARACTER SET OCTETS  NOT NULL REFERENCES LABORATORIOS (ID) ON DELETE CASCADE,
+    LAB_ACTIVO      CHAR(16) CHARACTER SET OCTETS  UNIQUE,
+    ID_USUARIO      CHAR(16) CHARACTER SET OCTETS  REFERENCES USUARIOS (ID) ON DELETE SET NULL,
+    ORIGEN          VARCHAR(20)   NOT NULL,          -- basica, intermedia, avanzada (o "ia")
+    PROYECTO        VARCHAR(40)   NOT NULL,          -- nombre del proyecto en GNS3
+    ESTADO          VARCHAR(12)   DEFAULT 'PROCESANDO' NOT NULL REFERENCES ESTADOS_DESPLIEGUE (CLAVE),
+    PORCENTAJE      SMALLINT      DEFAULT 0 NOT NULL,
+    PASO            VARCHAR(120),                    -- lo que está haciendo ahora
+    MENSAJE         VARCHAR(1000),                   -- resultado o error
+    INICIO          TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    ACTUALIZADO     TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,   -- latido
+    FIN             TIMESTAMP
+);
+
+-- ---------------------------------------------------------------------
 --  DATOS DE LOS CATÁLOGOS
 -- ---------------------------------------------------------------------
 INSERT INTO ROLES VALUES ('ADMIN',    'Administrador', 3);
@@ -179,5 +207,9 @@ INSERT INTO ESTADOS_LABORATORIO VALUES ('ERROR',     'Error');
 INSERT INTO ESTADOS_INVITACION VALUES ('PENDIENTE', 'Pendiente');
 INSERT INTO ESTADOS_INVITACION VALUES ('ACEPTADA',  'Aceptada');
 INSERT INTO ESTADOS_INVITACION VALUES ('RECHAZADA', 'Rechazada');
+
+INSERT INTO ESTADOS_DESPLIEGUE VALUES ('PROCESANDO', 'Procesando');
+INSERT INTO ESTADOS_DESPLIEGUE VALUES ('TERMINADO',  'Terminado');
+INSERT INTO ESTADOS_DESPLIEGUE VALUES ('ERROR',      'Error');
 
 COMMIT;

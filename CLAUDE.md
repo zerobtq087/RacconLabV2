@@ -109,11 +109,17 @@ Carpetas como fiber3: backend/{cmd,config,database,domain,repository,handler,mid
   Edit config pone la IP; ping entre router y Ubuntu.
 - raccoon.sh probado en la VM Rocky 9.8 (4 vCPU, 8 GB, sin KVM): instala, levanta y se autoprueba.
 - Laboratorio.vue: copiar con respaldo execCommand (http sin HTTPS); el botón cambia a "Copiado" 2 s.
+- Plantillas (probado en la laptop: 3 topologías × RIP/OSPF, ping entre redes por los routers):
+  POST/GET /api/plantillas/despliegue (solo PROFESOR, su lab CORRIENDO; contenedor y puerto los pone Go).
+  service/topologia.go valida y calcula TODAS las direcciones (único lugar; pruebas en topologia_test.go);
+  deploy_topology.yml solo aplica: nodos, switches (ports_mapping con "ethertype"), cables,
+  startup-config de cada router con cisco_router.j2 (archivo configs/i<id>_startup-config.cfg, sin telnet),
+  /etc/network/interfaces de Ubuntu o startup.vpc de VPCS, y enciende. En segundo plano con avance
+  en DESPLIEGUES (LAB_ACTIVO UNIQUE = uno a la vez por lab; latido). DesplegarTopologia(origen, topo)
+  es el camino común para la IA. Bases existentes: docs/migraciones/*.sql (raccoon.sh las aplica).
 
 ## Pendiente (en este orden)
-1. Backend de Plantillas: POST /api/plantillas/despliegue (solo PROFESOR, sobre SU laboratorio
-   corriendo) que ejecute deploy_topology.yml dentro del contenedor, en segundo plano con avance
-   en Firebird; Plantillas.vue muestra avance y resultado. Preparado para topologías de la IA.
+1. Probar Plantillas en la VM (raccoon.sh aplica la migración 001).
 2. Después (no ahora): calculadora de subredes en Go y la IA (Qwen en otra PC por LAN, documentos .md en Firebird).
 
 ## Proyectos de referencia (solo leer, NUNCA modificar ni copiar su estructura)

@@ -579,6 +579,29 @@ levantar_servicios() {
     podman-compose -p "$PROYECTO" up -d
 }
 
+# Migraciones: esquema.sql solo se aplica al CREAR la base; para una base que
+# ya existe, docs/migraciones/*.sql agregan lo nuevo (son idempotentes)
+aplicar_migraciones() {
+    paso "Base de datos (migraciones)"
+    local m i r=0
+    for ((i = 0; i < 60; i++)); do
+        echo "SELECT 1 FROM RDB\$DATABASE;" | podman exec -i -e ISC_PASSWORD="$FIREBIRD_ROOT_PASSWORD" \
+            raccoon-firebird isql -q -user SYSDBA /var/lib/firebird/data/raccoon.fdb >/dev/null 2>&1 && break
+        sleep 2
+    done
+    for m in "$REPO_DIR"/docs/migraciones/*.sql; do
+        [[ -f "$m" ]] || continue
+        if podman exec -i -e ISC_PASSWORD="$FIREBIRD_ROOT_PASSWORD" raccoon-firebird \
+            isql -q -bail -user SYSDBA /var/lib/firebird/data/raccoon.fdb < "$m" >/dev/null; then
+            bien "$(basename "$m")"
+        else
+            aviso "Falló la migración $(basename "$m")"
+            r=1
+        fi
+    done
+    return $r
+}
+
 # ---------------------------------------------------------------------
 #  10. Imágenes de routers y hosts (no están en git)
 # ---------------------------------------------------------------------
@@ -896,6 +919,7 @@ main() {
     no_critico preparar_host_ubuntu "Revisa el host Ubuntu en $VISTA/gns3/volumes/gns3_images/Docker (Dockerfile y $IMAGEN_UBUNTU)"
     no_critico avisar_labs_viejos "Revisa qué laboratorios usan la imagen anterior: docker ps"
     levantar_servicios
+    no_critico aplicar_migraciones "Aplica las migraciones a mano: ver docs/migraciones (isql en raccoon-firebird)"
 
     # Revisión final
     revisar_imagenes

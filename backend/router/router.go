@@ -60,8 +60,9 @@ func SetupRoutes(app *fiber.App, env *config.Env, db *gorm.DB, s *middleware.Ses
 	api.Get("/carreras", s.Validate, admin, grupoHandler.Carreras)
 
 	// Laboratorios GNS3 (alumno y maestro)
+	docker := service.NewDocker(env.DockerSocket)
 	laboratorioRepo := repository.NewLaboratorioRepository(db)
-	laboratorios := service.NewLaboratorios(laboratorioRepo, service.NewDocker(env.DockerSocket), env)
+	laboratorios := service.NewLaboratorios(laboratorioRepo, docker, env)
 	laboratorioHandler := handler.NewLaboratorioHandler(laboratorioRepo, laboratorios)
 	labs := api.Group("/labs", s.Validate, s.RequireRol("ALUMNO", "PROFESOR"))
 	labs.Get("/", laboratorioHandler.Status)
@@ -72,6 +73,13 @@ func SetupRoutes(app *fiber.App, env *config.Env, db *gorm.DB, s *middleware.Ses
 	labs.Get("/invitaciones", laboratorioHandler.Invitations)
 	labs.Post("/invitaciones", laboratorioHandler.Invite)
 	labs.Put("/invitaciones/:id", laboratorioHandler.Answer)
+
+	// Plantillas: el profesor despliega topologías en SU laboratorio (en segundo plano)
+	despliegues := service.NewDespliegues(repository.NewDespliegueRepository(db), laboratorioRepo, docker, env)
+	plantillaHandler := handler.NewPlantillaHandler(despliegues)
+	plantillas := api.Group("/plantillas", s.Validate, s.RequireRol("PROFESOR"))
+	plantillas.Post("/despliegue", plantillaHandler.Desplegar)
+	plantillas.Get("/despliegue", plantillaHandler.Estado)
 
 	// Monitor de laboratorios (solo admin)
 	api.Get("/monitor", s.Validate, admin, laboratorioHandler.Monitor)

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -176,6 +177,12 @@ func (d *Docker) Running(ctx context.Context, nombre string) bool {
 // Exec corre un comando dentro del contenedor (como "docker exec")
 // y regresa la salida y el código de salida
 func (d *Docker) Exec(ctx context.Context, nombre string, cmd []string) (string, int, error) {
+	return d.ExecStream(ctx, nombre, cmd, nil)
+}
+
+// ExecStream es Exec, pero además llama a porLinea con cada línea de salida
+// en cuanto llega (así se reporta el avance de ansible-playbook)
+func (d *Docker) ExecStream(ctx context.Context, nombre string, cmd []string, porLinea func(string)) (string, int, error) {
 	var ex struct {
 		ID string `json:"Id"`
 	}
@@ -195,7 +202,7 @@ func (d *Docker) Exec(ctx context.Context, nombre string, cmd []string) (string,
 	if err != nil {
 		return "", -1, err
 	}
-	salida := demultiplexar(resp.Body)
+	salida := demultiplexar(resp.Body, porLinea)
 	resp.Body.Close()
 
 	var estado struct {
@@ -207,21 +214,72 @@ func (d *Docker) Exec(ctx context.Context, nombre string, cmd []string) (string,
 	return salida, estado.ExitCode, nil
 }
 
-// demultiplexar quita los encabezados de 8 bytes que Docker pone a stdout/stderr
-func demultiplexar(r io.Reader) string {
-	var out strings.Builder
+// demultiplexar quita los encabezados de 8 bytes que Docker pone a stdout/stderr.
+// Si porLinea no es nil, la llama con cada línea completa. Regresa la salida
+// (si pasa de 1 MB, solo el final: ahí están los errores).
+func demultiplexar(r io.Reader, porLinea func(string)) string {
+	const maximo = 1 << 20
+	var out, pendiente []byte
 	cab := make([]byte, 8)
 	for {
 		if _, err := io.ReadFull(r, cab); err != nil {
 			break
 		}
-		n := binary.BigEndian.Uint32(cab[4:])
-		if _, err := io.CopyN(&out, r, int64(n)); err != nil {
+		trozo := make([]byte, binary.BigEndian.Uint32(cab[4:]))
+		if _, err := io.ReadFull(r, trozo); err != nil {
 			break
 		}
-		if out.Len() > 1<<20 { // máximo 1 MB de salida
-			break
+		out = append(out, trozo...)
+		if len(out) > maximo {
+			out = out[len(out)-maximo:]
+		}
+		if porLinea != nil {
+			pendiente = append(pendiente, trozo...)
+			for {
+				i := bytes.IndexByte(pendiente, '\n')
+				if i < 0 {
+					break
+				}
+				porLinea(strings.TrimRight(string(pendiente[:i]), "\r"))
+				pendiente = pendiente[i+1:]
+			}
 		}
 	}
-	return out.String()
+	if porLinea != nil && len(pendiente) > 0 {
+		porLinea(string(pendiente))
+	}
+	return string(out)
+}
+
+// CopyFile escribe un archivo dentro del contenedor (como "docker cp"):
+// la API de Docker recibe un .tar y lo extrae en la carpeta indicada
+func (d *Docker) CopyFile(ctx context.Context, nombre, carpeta, archivo string, contenido []byte) error {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: archivo, Mode: 0o644, Size: int64(len(contenido)), ModTime: time.Now()}); err != nil {
+		return err
+	}
+	if _, err := tw.Write(contenido); err != nil {
+		return err
+	}
+	if err := tw.Close(); err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut,
+		"http://docker/containers/"+url.PathEscape(nombre)+"/archive?path="+url.QueryEscape(carpeta), &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-tar")
+	resp, err := d.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("no se pudo hablar con Docker: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		msg, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("docker respondió %d al copiar %s: %s", resp.StatusCode, archivo, strings.TrimSpace(string(msg)))
+	}
+	return nil
 }
