@@ -126,9 +126,19 @@ Carpetas como fiber3: backend/{cmd,config,database,domain,repository,handler,mid
   en DESPLIEGUES (LAB_ACTIVO UNIQUE = uno a la vez por lab; latido). DesplegarTopologia(origen, topo)
   es el camino común para la IA. Bases existentes: docs/migraciones/*.sql (raccoon.sh las aplica).
 
+- Plantillas probadas en la VM (Básica e Intermedia). deploy_templates.yml: cada plantilla con ID FIJO
+  (nombre | to_uuid) y se borran copias con otro ID: el GNS3 de escritorio 2.2.59 junta IDs viejos y
+  nuevos al reconectar a un lab recreado (duplicados y "Template <id> doesn't exist").
+  Los switches se crean con el símbolo de la plantilla "Ethernet switch" (sin él, GNS3 pone computadora).
+- "Host requires authentication" en GNS3 de escritorio = el cliente reintenta con el token del lab
+  anterior tras Limpiar/crear (token nuevo); se arregla poniendo el token nuevo en Preferences.
+- Calculadora de redes (/calculadora, todos los roles): service/calculadora.go (subred con binario,
+  dividir, VLSM con espacio libre, enlaces /30 /31, sumarización, conversión), pruebas en
+  calculadora_test.go; components/BotonCopiar.vue reutilizable.
+
 ## Pendiente (en este orden)
-1. Probar Plantillas en la VM (raccoon.sh aplica la migración 001).
-2. Después (no ahora): calculadora de subredes en Go y la IA (Qwen en otra PC por LAN, documentos .md en Firebird).
+1. Probar en la VM: Avanzada y modo cooperativo (en la escuela).
+2. Después (no ahora): la IA (Qwen en otra PC por LAN, documentos .md en Firebird).
 
 ## Proyectos de referencia (solo leer, NUNCA modificar ni copiar su estructura)
 - ~/GoProjects/fiber3 → proyecto del profe. ES EL MODELO a seguir para backend

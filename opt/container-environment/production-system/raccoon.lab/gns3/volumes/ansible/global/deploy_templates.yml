@@ -186,11 +186,40 @@
         templates: "{{ templates + [ubuntu_template] }}"
       when: imagen_ubuntu.rc == 0
 
+    # ID FIJO por plantilla (sale del nombre con to_uuid): cuando se limpia y se crea
+    # otro lab, las plantillas tienen los mismos IDs. Si no, el GNS3 de escritorio
+    # junta los IDs viejos con los nuevos (plantillas duplicadas y "Template <id>
+    # doesn't exist" al arrastrar una de las viejas).
+    - name: Asignar el ID fijo de cada plantilla
+      ansible.builtin.set_fact:
+        con_id: "{{ con_id | default([]) + [item | combine({'template_id': item.name | to_uuid})] }}"
+      loop: "{{ templates }}"
+      loop_control:
+        label: "{{ item.name }} -> {{ item.name | to_uuid }}"
+
+    - name: Usar las plantillas con su ID fijo
+      ansible.builtin.set_fact:
+        templates: "{{ con_id }}"
+
     - name: Obtener lista de templates actuales en el contenedor del alumno
       uri:
         url: "{{ gns3_url }}/v2/templates"
         method: GET
       register: existing_templates
+
+    # Nunca duplicar: si hay una plantilla con nuestro nombre pero con otro ID
+    # (copia vieja o repetida), se borra; la buena se crea con su ID fijo
+    - name: Quitar copias de nuestras plantillas con otro ID
+      uri:
+        url: "{{ gns3_url }}/v2/templates/{{ item.template_id }}"
+        method: DELETE
+        status_code: [200, 204, 404]
+      loop: "{{ existing_templates.json | rejectattr('builtin') | list }}"
+      loop_control:
+        label: "{{ item.name }} ({{ item.template_id }})"
+      when:
+        - item.name in (templates | map(attribute='name') | list)
+        - item.template_id != (item.name | to_uuid)
 
     - name: Crear templates en GNS3 solo si no existen
       uri:
@@ -198,8 +227,8 @@
         method: POST
         body_format: json
         body: "{{ item }}"
-        status_code: [201, 409]
+        status_code: [201, 409] # 409 = ya existe con ese ID
       loop: "{{ templates }}"
       loop_control:
         label: "{{ item.name }}"
-      when: "item.name not in (existing_templates.json | map(attribute='name') | list)"
+      when: "item.template_id not in (existing_templates.json | map(attribute='template_id') | list)"

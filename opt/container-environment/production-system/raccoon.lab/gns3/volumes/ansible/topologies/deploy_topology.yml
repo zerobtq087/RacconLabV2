@@ -153,6 +153,9 @@
           name: "{{ item.name }}"
           node_type: "ethernet_switch"
           compute_id: "local"
+          # Sin "symbol", GNS3 le pone el ícono de computadora: se usa el de la
+          # plantilla integrada "Ethernet switch"
+          symbol: "{{ gns3_templates.json | selectattr('name', 'equalto', 'Ethernet switch') | map(attribute='symbol') | first | default(':/symbols/ethernet_switch.svg') }}"
           x: "{{ item.x }}"
           y: "{{ item.y }}"
           properties:

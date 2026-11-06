@@ -87,6 +87,16 @@ func SetupRoutes(app *fiber.App, env *config.Env, db *gorm.DB, s *middleware.Ses
 	plantillas.Post("/despliegue", plantillaHandler.Desplegar)
 	plantillas.Get("/despliegue", plantillaHandler.Estado)
 
+	// Calculadora de redes (cualquier usuario con sesión: alumno, profesor o admin)
+	calculadoraHandler := handler.NewCalculadoraHandler()
+	calculadora := api.Group("/calculadora", s.Validate)
+	calculadora.Post("/subred", calculadoraHandler.Subred)
+	calculadora.Post("/dividir", calculadoraHandler.Dividir)
+	calculadora.Post("/vlsm", calculadoraHandler.VLSM)
+	calculadora.Post("/enlaces", calculadoraHandler.Enlaces)
+	calculadora.Post("/sumarizar", calculadoraHandler.Sumarizar)
+	calculadora.Post("/convertir", calculadoraHandler.Convertir)
+
 	// Monitor de laboratorios (solo admin)
 	api.Get("/monitor", s.Validate, admin, laboratorioHandler.Monitor)
 	api.Delete("/monitor/:id", s.Validate, admin, laboratorioHandler.Close)
