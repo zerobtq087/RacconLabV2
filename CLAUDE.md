@@ -124,21 +124,23 @@ Carpetas como fiber3: backend/{cmd,config,database,domain,repository,handler,mid
   startup-config de cada router con cisco_router.j2 (archivo configs/i<id>_startup-config.cfg, sin telnet),
   /etc/network/interfaces de Ubuntu o startup.vpc de VPCS, y enciende. En segundo plano con avance
   en DESPLIEGUES (LAB_ACTIVO UNIQUE = uno a la vez por lab; latido). DesplegarTopologia(origen, topo)
-  es el camino común para la IA. Bases existentes: docs/migraciones/*.sql (raccoon.sh las aplica).
+  es el camino común para cualquier topología. Bases existentes: docs/migraciones/*.sql (raccoon.sh las aplica).
 
 - Plantillas probadas en la VM (Básica e Intermedia). deploy_templates.yml: cada plantilla con ID FIJO
   (nombre | to_uuid) y se borran copias con otro ID: el GNS3 de escritorio 2.2.59 junta IDs viejos y
   nuevos al reconectar a un lab recreado (duplicados y "Template <id> doesn't exist").
   Los switches se crean con el símbolo de la plantilla "Ethernet switch" (sin él, GNS3 pone computadora).
+- Redes de Plantillas: acepta cualquier IP/prefijo (192.200.100.50/16 → 192.200.0.0/16, públicas
+  incluidas); LAN más chica que /24 se divide en partes iguales; si no alcanza dice cuántas direcciones
+  faltan y qué prefijo usar; gateway de VLAN fuera sugiere el rango. POST /api/plantillas/redes revisa en
+  vivo (Plantillas.vue muestra red, máscara y rango debajo de cada campo). Diagramas sobre panel oscuro
+  (las imágenes son para fondo oscuro). La calculadora de redes se quitó.
 - "Host requires authentication" en GNS3 de escritorio = el cliente reintenta con el token del lab
   anterior tras Limpiar/crear (token nuevo); se arregla poniendo el token nuevo en Preferences.
-- Calculadora de redes (/calculadora, todos los roles): service/calculadora.go (subred con binario,
-  dividir, VLSM con espacio libre, enlaces /30 /31, sumarización, conversión), pruebas en
-  calculadora_test.go; components/BotonCopiar.vue reutilizable.
 
 ## Pendiente (en este orden)
 1. Probar en la VM: Avanzada y modo cooperativo (en la escuela).
-2. Después (no ahora): la IA (Qwen en otra PC por LAN, documentos .md en Firebird).
+2. Prácticas con calificación (plan en revisión; la IA con Qwen se quitó del proyecto, de acuerdo con el profe).
 
 ## Proyectos de referencia (solo leer, NUNCA modificar ni copiar su estructura)
 - ~/GoProjects/fiber3 → proyecto del profe. ES EL MODELO a seguir para backend

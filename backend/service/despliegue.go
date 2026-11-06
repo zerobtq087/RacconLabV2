@@ -95,6 +95,60 @@ func (s *Despliegues) DesplegarTopologia(idUsuario, origen string, topo *domain.
 	return nil
 }
 
+// RevisarRedes: lo que la página muestra mientras el profesor escribe. Calcula la red
+// de cada campo (aunque escriba una IP de host) y, si todo es válido, prueba la plantilla
+// completa para decir si alcanza (y cuántas direcciones faltan si no).
+func (s *Despliegues) RevisarRedes(sol *domain.SolicitudDespliegue) *domain.RevisionRedes {
+	r := &domain.RevisionRedes{Vlans: []domain.InfoVlan{}}
+	hayError := false
+	info := func(texto, que string) *domain.InfoRed {
+		i, err := InfoDeRed(texto, que)
+		if err != nil {
+			hayError = true
+			return &domain.InfoRed{Error: err.Error()}
+		}
+		return i
+	}
+
+	r.LAN = info(sol.Subnet, "Red LAN")
+	if sol.SerialSubnet != "" {
+		r.Serial = info(sol.SerialSubnet, "Red de enlaces")
+	}
+	for _, v := range sol.Vlans {
+		iv := domain.InfoVlan{ID: v.ID, Subred: info(v.Subnet, fmt.Sprintf("Subred de la VLAN %d", v.ID))}
+		if iv.Subred.Error == "" {
+			p, _ := red(v.Subnet, "")
+			if _, err := hostDe(p, v.Gateway, fmt.Sprintf("Gateway de la VLAN %d", v.ID)); err != nil {
+				iv.ErrorGateway, hayError = err.Error(), true
+			}
+		}
+		r.Vlans = append(r.Vlans, iv)
+	}
+	if hayError {
+		return r
+	}
+
+	// ¿Alcanza para la topología de la plantilla?
+	archivo, ok := Plantillas[sol.Plantilla]
+	if !ok {
+		r.Error = "Elige una plantilla"
+		return r
+	}
+	topo, err := CargarTopologia(s.dirTopologias(), archivo)
+	if err != nil {
+		r.Error = err.Error()
+		return r
+	}
+	prueba := *sol
+	prueba.NombreLab, prueba.RoutingProtocol, prueba.OspfArea = "Revision", "ospf", 0 // no se revisan aquí
+	if err := ValidarSolicitud(&prueba); err != nil {
+		r.Error = err.Error()
+	} else if err := ResolverTopologia(topo, &prueba); err != nil {
+		r.Error = err.Error()
+	}
+	return r
+}
+
 // Estado: el último despliegue del laboratorio del usuario
 func (s *Despliegues) Estado(idUsuario string) *domain.Despliegue {
 	if lab, _ := s.labs.ByUser(idUsuario); lab != nil {

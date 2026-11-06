@@ -109,3 +109,29 @@ type Red struct {
 	Network  string `json:"network"`
 	Wildcard string `json:"wildcard"`
 }
+
+// InfoRed: la red calculada de lo que escribió el profesor (se muestra debajo del campo)
+type InfoRed struct {
+	Red        string `json:"red"` // ej. 192.200.0.0/16
+	Mascara    string `json:"mascara"`
+	PrimerHost string `json:"primer_host"`
+	UltimoHost string `json:"ultimo_host"`
+	Hosts      uint32 `json:"hosts"`
+	Error      string `json:"error,omitempty"`
+}
+
+// InfoVlan: la subred y el gateway de una VLAN, revisados
+type InfoVlan struct {
+	ID           int      `json:"id"`
+	Subred       *InfoRed `json:"subred"`
+	ErrorGateway string   `json:"error_gateway,omitempty"`
+}
+
+// RevisionRedes: lo que la página muestra mientras el profesor escribe
+// (POST /api/plantillas/redes), antes de desplegar
+type RevisionRedes struct {
+	LAN    *InfoRed   `json:"lan"`
+	Serial *InfoRed   `json:"serial,omitempty"`
+	Vlans  []InfoVlan `json:"vlans"`
+	Error  string     `json:"error"` // "no alcanza", traslapes... (para toda la topología)
+}

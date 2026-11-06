@@ -30,3 +30,26 @@ export class EstadoDespliegue {
     public inicio: string = ''
   ) { }
 }
+
+// Revisión en vivo de las redes (POST /api/plantillas/redes, igual que domain.RevisionRedes)
+export interface InfoRed {
+  red: string             // red calculada, ej. 192.200.0.0/16
+  mascara: string
+  primer_host: string
+  ultimo_host: string
+  hosts: number
+  error?: string
+}
+
+export interface InfoVlan {
+  id: number
+  subred: InfoRed
+  error_gateway?: string
+}
+
+export interface RevisionRedes {
+  lan: InfoRed
+  serial?: InfoRed
+  vlans: InfoVlan[]
+  error: string           // para toda la topología: "no alcanza", redes encimadas...
+}

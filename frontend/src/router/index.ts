@@ -14,7 +14,6 @@ import Grupos from '@/pages/Grupos.vue'
 import Laboratorio from '@/pages/Laboratorio.vue'
 import Monitor from '@/pages/Monitor.vue'
 import Plantillas from '@/pages/Plantillas.vue'
-import Calculadora from '@/pages/Calculadora.vue'
 import Settings from '@/pages/Settings.vue'
 import { useAuthStore } from '@/stores/auth'
 
@@ -27,7 +26,6 @@ const router = createRouter({
     { path: '/grupos', component: Grupos, meta: { requiresAuth: true, roles: ['ADMIN', 'PROFESOR'] } },
     { path: '/laboratorio', component: Laboratorio, meta: { requiresAuth: true, roles: ['ALUMNO', 'PROFESOR'] } },
     { path: '/plantillas', component: Plantillas, meta: { requiresAuth: true, roles: ['PROFESOR'] } },
-    { path: '/calculadora', component: Calculadora, meta: { requiresAuth: true, roles: ['ADMIN', 'PROFESOR', 'ALUMNO'] } },
     { path: '/monitor', component: Monitor, meta: { requiresAuth: true, roles: ['ADMIN'] } },
     { path: '/settings', component: Settings, meta: { requiresAuth: true } },
     { path: '/login', component: Login, meta: { requiresAuth: false, requiresGuest: true } },

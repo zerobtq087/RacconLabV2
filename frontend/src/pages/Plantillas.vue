@@ -72,7 +72,7 @@
                 variant="outlined"
               />
 
-              <v-row class="mt-1" dense>
+              <v-row class="mt-3" dense>
                 <v-col cols="7">
                   <v-select v-model="form.routing_protocol" item-title="text" item-value="value" :items="protocolos" label="Enrutamiento" variant="outlined" />
                 </v-col>
@@ -81,43 +81,56 @@
                 </v-col>
               </v-row>
 
+              <!-- Cualquier IP y prefijo: el backend calcula la red y la muestra debajo -->
               <v-row dense>
                 <v-col cols="8">
-                  <v-text-field v-model="lan.ip" label="Red LAN" :rules="[ipValida]" variant="outlined" />
+                  <v-text-field v-model="lan.ip" hide-details label="Red LAN (cualquier IP de la red)" variant="outlined" />
                 </v-col>
                 <v-col cols="4">
-                  <v-select v-model="lan.cidr" :items="[16, 20, 22, 24, 26, 28]" label="Prefijo" prefix="/" variant="outlined" />
+                  <v-text-field v-model.number="lan.cidr" hide-details label="Prefijo" max="30" min="1" prefix="/" type="number" variant="outlined" />
                 </v-col>
               </v-row>
+              <InfoRedCampo class="mb-4" :info="revision?.lan" />
 
-              <v-row v-if="form.plantilla != 'basica'" dense>
-                <v-col cols="8">
-                  <v-text-field v-model="serial.ip" label="Red de enlaces seriales" :rules="[ipValida]" variant="outlined" />
-                </v-col>
-                <v-col cols="4">
-                  <v-select v-model="serial.cidr" :items="[24, 26, 27, 28, 29]" label="Prefijo" prefix="/" variant="outlined" />
-                </v-col>
-              </v-row>
+              <template v-if="form.plantilla != 'basica'">
+                <v-row dense>
+                  <v-col cols="8">
+                    <v-text-field v-model="serial.ip" hide-details label="Red de enlaces seriales" variant="outlined" />
+                  </v-col>
+                  <v-col cols="4">
+                    <v-text-field v-model.number="serial.cidr" hide-details label="Prefijo" max="30" min="1" prefix="/" type="number" variant="outlined" />
+                  </v-col>
+                </v-row>
+                <InfoRedCampo class="mb-4" :info="revision?.serial" />
+              </template>
 
               <template v-if="form.plantilla == 'avanzada'">
                 <div class="text-subtitle-2">VLANs</div>
                 <div class="text-caption text-medium-emphasis mb-2">
                   La topología avanzada usa las VLAN 10 y 20 (switch y subinterfaces de R1); elige su subred y gateway.
                 </div>
-                <v-row v-for="(v, i) in form.vlans" :key="i" dense>
-                  <v-col cols="3"><v-text-field v-model.number="v.id" label="ID" readonly type="number" variant="outlined" /></v-col>
-                  <v-col cols="5"><v-text-field v-model="v.subnet" label="Subred" variant="outlined" /></v-col>
-                  <v-col cols="4"><v-text-field v-model="v.gateway" label="Gateway" variant="outlined" /></v-col>
-                </v-row>
+                <template v-for="(v, i) in form.vlans" :key="i">
+                  <v-row dense>
+                    <v-col cols="3"><v-text-field v-model.number="v.id" hide-details label="ID" readonly type="number" variant="outlined" /></v-col>
+                    <v-col cols="5"><v-text-field v-model="v.subnet" hide-details label="Subred (IP/prefijo)" variant="outlined" /></v-col>
+                    <v-col cols="4"><v-text-field v-model="v.gateway" hide-details label="Gateway" variant="outlined" /></v-col>
+                  </v-row>
+                  <InfoRedCampo :info="revision?.vlans[i]?.subred" />
+                  <div v-if="revision?.vlans[i]?.error_gateway" class="text-caption text-error">{{ revision.vlans[i].error_gateway }}</div>
+                  <div class="mb-3" />
+                </template>
               </template>
             </template>
           </template>
 
           <template #actions>
+            <div class="w-100">
+            <!-- ¿Alcanzan las redes para esta topología? (se revisa mientras escribes) -->
+            <v-alert v-if="errorRedes" class="mb-3" density="compact" :text="errorRedes" type="warning" variant="tonal" />
             <v-btn
               block
               color="primary"
-              :disabled="!labListo || !form.plantilla || ocupado"
+              :disabled="!labListo || !form.plantilla || ocupado || !!errorRedes"
               :loading="enviando || ocupado"
               prepend-icon="mdi-play"
               size="large"
@@ -125,6 +138,7 @@
               variant="flat"
               @click="desplegar"
             />
+            </div>
           </template>
         </v-card>
       </v-col>
@@ -132,7 +146,9 @@
       <v-col cols="12" lg="6">
         <v-card border class="h-100" elevation="0" rounded="lg" title="2. Diagrama">
           <template #text>
-            <div class="d-flex align-center justify-center" style="min-height: 380px">
+            <!-- Los diagramas están dibujados para fondo oscuro (hosts blancos): se muestran
+                 siempre sobre un panel oscuro, así se ven igual con el tema claro y el oscuro -->
+            <div class="d-flex align-center justify-center diagrama" style="min-height: 380px">
               <v-img v-if="plantilla" contain max-height="420" :src="plantilla.imagen" />
               <div v-else class="text-medium-emphasis">Selecciona una plantilla para ver su diagrama.</div>
             </div>
@@ -145,9 +161,10 @@
 
 <script lang="ts" setup>
 import AppFrame from '../components/AppFrame.vue'
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import InfoRedCampo from '../components/InfoRedCampo.vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import axios from 'axios'
-import { Despliegue, EstadoDespliegue } from '@/models/Despliegue'
+import { Despliegue, EstadoDespliegue, type RevisionRedes } from '@/models/Despliegue'
 
 const plantillas = [
   { clave: 'basica', titulo: 'Básica (1 router)', imagen: '/img/topologies/topologia_basica.png' },
@@ -181,8 +198,36 @@ const tituloEstado = computed(() => ({
 const iconoEstado = computed(() => ({ PROCESANDO: 'mdi-progress-clock', TERMINADO: 'mdi-check-circle', ERROR: 'mdi-alert-circle' } as Record<string, string>)[estado.value.estado])
 const colorEstado = computed(() => ({ PROCESANDO: 'primary', TERMINADO: 'success', ERROR: 'error' } as Record<string, string>)[estado.value.estado])
 
-const ipValida = (v: string) =>
-  /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(v) || 'IPv4 inválida'
+// Lo que se manda al backend (red LAN, serial y VLANs según la plantilla)
+function datosRedes (): Despliegue {
+  return {
+    ...form.value,
+    subnet: `${lan.ip}/${lan.cidr}`,
+    serial_subnet: form.value.plantilla == 'basica' ? '' : `${serial.ip}/${serial.cidr}`,
+    vlans: form.value.plantilla == 'avanzada' ? form.value.vlans : [],
+  }
+}
+
+// Revisión en vivo de las redes: red calculada de cada campo y si alcanzan para la topología
+const revision = ref<RevisionRedes | null>(null)
+const errorRedes = computed(() => {
+  const r = revision.value
+  if (!r) return ''
+  const campos = [r.lan, r.serial, ...r.vlans.map(v => v.subred)]
+  if (campos.some(c => c?.error) || r.vlans.some(v => v.error_gateway)) return 'Corrige las redes marcadas en rojo.'
+  return r.error
+})
+let timerRedes: ReturnType<typeof setTimeout> | undefined
+function revisarRedes () {
+  clearTimeout(timerRedes)
+  if (!form.value.plantilla) return
+  timerRedes = setTimeout(() => {
+    axios.post('/api/plantillas/redes', datosRedes())
+      .then(response => revision.value = response.data)
+      .catch(() => revision.value = null)
+  }, 350)
+}
+watch([lan, serial, () => form.value.plantilla, () => JSON.stringify(form.value.vlans)], revisarRedes, { deep: true })
 
 // Valores de ejemplo de cada plantilla (como el original)
 function aplicarPlantilla (clave: string) {
@@ -226,12 +271,7 @@ function cargarEstado () {
 }
 
 function desplegar () {
-  const datos: Despliegue = {
-    ...form.value,
-    subnet: `${lan.ip}/${lan.cidr}`,
-    serial_subnet: form.value.plantilla == 'basica' ? '' : `${serial.ip}/${serial.cidr}`,
-    vlans: form.value.plantilla == 'avanzada' ? form.value.vlans : [],
-  }
+  const datos = datosRedes()
 
   enviando.value = true
   errorEnvio.value = ''
@@ -248,5 +288,16 @@ onMounted(() => {
   cargarEstado()
 })
 
-onBeforeUnmount(() => clearTimeout(timerEstado))
+onBeforeUnmount(() => {
+  clearTimeout(timerEstado)
+  clearTimeout(timerRedes)
+})
 </script>
+
+<style scoped>
+.diagrama {
+  background: #1f2430; /* oscuro en ambos temas: los diagramas tienen hosts y textos claros */
+  border-radius: 8px;
+  padding: 12px;
+}
+</style>

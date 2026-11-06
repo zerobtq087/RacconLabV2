@@ -45,6 +45,15 @@ func (h *PlantillaHandler) Desplegar(c fiber.Ctx) error {
 	return c.Status(fiber.StatusInternalServerError).SendString("No se pudo iniciar el despliegue: " + err.Error())
 }
 
+// Redes: revisa en vivo las redes que escribe el profesor (red calculada y si alcanzan)
+func (h *PlantillaHandler) Redes(c fiber.Ctx) error {
+	var req domain.SolicitudDespliegue
+	if err := c.Bind().Body(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString("Datos inválidos")
+	}
+	return c.JSON(h.despliegues.RevisarRedes(&req))
+}
+
 // Estado: avance y resultado del último despliegue del laboratorio
 func (h *PlantillaHandler) Estado(c fiber.Ctx) error {
 	return c.JSON(h.despliegues.Estado(usuario(c)))

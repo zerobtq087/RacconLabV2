@@ -1,9 +1,11 @@
 package service
 
 import (
+	"cmp"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math/bits"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -90,31 +92,54 @@ func ValidarSolicitud(s *domain.SolicitudDespliegue) error {
 	return nil
 }
 
-// red convierte "192.168.1.0/24" en un prefijo IPv4 y exige que sea la dirección de red
+// red acepta CUALQUIER IP con su prefijo y regresa la red a la que pertenece:
+// "192.200.100.50/16" → 192.200.0.0/16 (no es error escribir una IP de host).
+// Sirve cualquier red IPv4 (privada, pública, clase A/B/C o prefijos poco comunes).
 func red(texto, que string) (netip.Prefix, error) {
 	p, err := netip.ParsePrefix(strings.TrimSpace(texto))
 	if err != nil || !p.Addr().Is4() {
-		return netip.Prefix{}, invalido("%s: \"%s\" no es una red IPv4 válida (ej. 192.168.1.0/24)", que, texto)
+		return netip.Prefix{}, invalido("%s: \"%s\" no es una IP con prefijo válida (ej. 192.168.1.0/24)", que, texto)
 	}
 	if p.Bits() > 30 {
-		return netip.Prefix{}, invalido("%s: /%d es demasiado pequeña (máximo /30)", que, p.Bits())
+		return netip.Prefix{}, invalido("%s: /%d es demasiado pequeña: no deja hosts (máximo /30)", que, p.Bits())
 	}
-	if p.Masked() != p {
-		return netip.Prefix{}, invalido("%s: %s no es una dirección de red; usa %s", que, texto, p.Masked())
-	}
-	return p, nil
+	return p.Masked(), nil
 }
 
-// hostDe valida que una IP sea un host (ni red ni broadcast) dentro del prefijo
+// rangoUsable: "192.168.10.1 a 192.168.10.254"
+func rangoUsable(p netip.Prefix) string {
+	return fmt.Sprintf("%s a %s", aIP(aNumero(p.Addr())+1), aIP(aNumero(ultima(p))-1))
+}
+
+// hostDe valida que una IP sea un host (ni red ni broadcast) dentro del prefijo;
+// si no, dice qué IPs serían válidas
 func hostDe(p netip.Prefix, texto, que string) (netip.Addr, error) {
 	a, err := netip.ParseAddr(strings.TrimSpace(texto))
 	if err != nil || !a.Is4() {
 		return netip.Addr{}, invalido("%s: \"%s\" no es una IP válida", que, texto)
 	}
-	if !p.Contains(a) || a == p.Addr() || a == ultima(p) {
-		return netip.Addr{}, invalido("%s: %s no es un host de %s", que, a, p)
+	switch {
+	case !p.Contains(a):
+		return netip.Addr{}, invalido("%s: %s no está dentro de %s; usa una IP de %s (por ejemplo %s)",
+			que, a, p, rangoUsable(p), aIP(aNumero(p.Addr())+1))
+	case a == p.Addr():
+		return netip.Addr{}, invalido("%s: %s es la dirección de red de %s; usa una IP de %s", que, a, p, rangoUsable(p))
+	case a == ultima(p):
+		return netip.Addr{}, invalido("%s: %s es el broadcast de %s; usa una IP de %s", que, a, p, rangoUsable(p))
 	}
 	return a, nil
+}
+
+// InfoDeRed: lo que se muestra debajo de cada campo (red calculada, máscara y rango usable)
+func InfoDeRed(texto, que string) (*domain.InfoRed, error) {
+	p, err := red(texto, que)
+	if err != nil {
+		return nil, err
+	}
+	return &domain.InfoRed{
+		Red: p.String(), Mascara: mascara(p.Bits()), PrimerHost: aIP(aNumero(p.Addr()) + 1).String(),
+		UltimoHost: aIP(aNumero(ultima(p)) - 1).String(), Hosts: tamano(p) - 2,
+	}, nil
 }
 
 // ---------------------------------------------------------------------
@@ -215,6 +240,13 @@ func ResolverTopologia(t *domain.Topologia, s *domain.SolicitudDespliegue) error
 		}
 	}
 
+	// Tamaño de cada LAN: /24 si la red alcanza; si es más chica, se divide
+	// en partes iguales (ej. una /24 para 4 LAN → 4 redes /26)
+	bitsLAN := max(24, lan.Bits()+bits.Len(uint(max(cuenta["lan"], 1)-1)))
+	if err := revisarCapacidad(t, s, lan, bitsLAN, clase, orden, vlans); err != nil {
+		return err
+	}
+
 	// 2) Repartir las redes en el orden en que aparecen (como el original)
 	redes := map[string]netip.Prefix{}
 	gateways := map[string]netip.Addr{} // VLAN: el gateway lo da el profesor
@@ -228,7 +260,7 @@ func ResolverTopologia(t *domain.Topologia, s *domain.SolicitudDespliegue) error
 				return invalido("La topología usa la VLAN %d: agrégala en la sección de VLANs", id)
 			}
 			p, _ := red(v.Subnet, "")
-			g, _ := netip.ParseAddr(v.Gateway)
+			g, _ := netip.ParseAddr(strings.TrimSpace(v.Gateway))
 			redes[tag], gateways[tag] = p, g
 		case "serial":
 			if bolsaSerial == nil {
@@ -246,7 +278,7 @@ func ResolverTopologia(t *domain.Topologia, s *domain.SolicitudDespliegue) error
 		default:
 			bits := ifz.MaskBits
 			if bits == 0 {
-				bits = max(24, lan.Bits())
+				bits = bitsLAN
 			}
 			p, err := bolsaLAN.tomar(bits, cuenta["lan"])
 			if err != nil {
@@ -346,15 +378,110 @@ func ResolverTopologia(t *domain.Topologia, s *domain.SolicitudDespliegue) error
 
 	// 5) Parámetros del profesor dentro del JSON (como el original) y nombre del proyecto
 	t.ProjectName = s.NombreLab
+	// Se guardan las redes ya calculadas (192.200.100.50/16 → 192.200.0.0/16)
+	vlansCalc := []domain.Vlan{}
+	for _, v := range s.Vlans {
+		p, _ := red(v.Subnet, "")
+		vlansCalc = append(vlansCalc, domain.Vlan{ID: v.ID, Subnet: p.String(), Gateway: strings.TrimSpace(v.Gateway)})
+	}
+	serialCalc := ""
+	if bolsaSerial != nil {
+		serialCalc = bolsaSerial.bloque.String()
+	}
 	t.ProjectSettings = &domain.ProjectSettings{
-		Subnet:          s.Subnet,
-		SerialSubnet:    s.SerialSubnet,
-		Vlans:           s.Vlans,
+		Subnet:          lan.String(),
+		SerialSubnet:    serialCalc,
+		Vlans:           vlansCalc,
 		RoutingProtocol: s.RoutingProtocol,
 		OspfArea:        s.OspfArea,
 	}
-	if t.ProjectSettings.Vlans == nil {
-		t.ProjectSettings.Vlans = []domain.Vlan{}
+	return nil
+}
+
+// tamanoMinimo: direcciones que necesita una red para que quepa el host número n
+// (más red y broadcast), redondeado a potencia de 2. Ej. hasta el host 20 → 32 (/27)
+func tamanoMinimo(n int) uint64 { return max(4, uint64(1)<<bits.Len(uint(n+1))) }
+
+// prefijoPara: el prefijo de una red con ese número de direcciones (potencia de 2)
+func prefijoPara(direcciones uint64) int { return 33 - bits.Len64(direcciones) }
+
+// revisarCapacidad: antes de repartir, ¿alcanzan la red LAN, la serial y cada VLAN?
+// Si no, dice cuántas direcciones faltan y qué prefijo usar.
+func revisarCapacidad(t *domain.Topologia, s *domain.SolicitudDespliegue, lan netip.Prefix, bitsLAN int,
+	clase map[string]string, orden []string, vlans map[int]domain.Vlan) error {
+
+	// El número de host más alto que se usa en cada red (routers: 1 por omisión; hosts: 10)
+	maxHost := map[string]int{}
+	for _, n := range t.Nodes {
+		for _, i := range n.Interfaces {
+			if i.SubnetTag != "" {
+				maxHost[i.SubnetTag] = max(maxHost[i.SubnetTag], cmp.Or(i.HostNumber, 1))
+			}
+		}
+		if n.Type == "docker" {
+			tag := n.SubnetTag
+			if tag == "" && n.Vlan > 0 {
+				tag = fmt.Sprintf("vlan_%d", n.Vlan)
+			}
+			maxHost[tag] = max(maxHost[tag], cmp.Or(n.HostNumber, 10))
+		}
+	}
+
+	var lanes, seriales []string
+	for _, tag := range orden {
+		switch clase[tag] {
+		case "lan":
+			lanes = append(lanes, tag)
+		case "serial":
+			seriales = append(seriales, tag)
+		case "vlan":
+			v, ok := vlans[vlanDe(primeraInterfaz(t, tag))]
+			if !ok {
+				continue // ResolverTopologia dice qué VLAN falta
+			}
+			p, _ := red(v.Subnet, "")
+			if necesita := tamanoMinimo(maxHost[tag]); uint64(tamano(p)) < necesita {
+				return invalido("La VLAN %d (%s) es muy chica: sus hosts usan hasta el número %d y se necesitan "+
+					"al menos %d direcciones (/%d). Tiene %d: faltan %d.",
+					v.ID, p, maxHost[tag], necesita, prefijoPara(necesita), tamano(p), necesita-uint64(tamano(p)))
+			}
+		}
+	}
+
+	// LAN: todas del mismo tamaño
+	if len(lanes) > 0 {
+		porLAN := uint64(4)
+		for _, tag := range lanes {
+			porLAN = max(porLAN, tamanoMinimo(maxHost[tag]))
+		}
+		if bitsLAN > 30 || uint64(1)<<(32-bitsLAN) < porLAN {
+			total := porLAN << bits.Len(uint(len(lanes)-1)) // LANs redondeadas a potencia de 2
+			cuantas := fmt.Sprintf("las %d redes LAN de la topología: cada una necesita", len(lanes))
+			if len(lanes) == 1 {
+				cuantas = "la red LAN de la topología: necesita"
+			}
+			return invalido("La red LAN %s no alcanza para %s al menos %d direcciones (/%d) y en total se necesitan %d. "+
+				"Tiene %d: faltan %d direcciones. Usa un prefijo /%d o menor (una red más grande).",
+				lan, cuantas, porLAN, prefijoPara(porLAN), total, tamano(lan), total-uint64(tamano(lan)), prefijoPara(total))
+		}
+	}
+
+	// Enlaces seriales: /30 cada uno (o el tamaño que diga la topología)
+	if len(seriales) > 0 && s.SerialSubnet != "" {
+		serial, _ := red(s.SerialSubnet, "")
+		var total uint64
+		for _, tag := range seriales {
+			total += uint64(1) << (32 - cmp.Or(primeraInterfaz(t, tag).MaskBits, 30))
+		}
+		if total > uint64(tamano(serial)) {
+			cuantos := fmt.Sprintf("los %d enlaces entre routers: cada uno usa", len(seriales))
+			if len(seriales) == 1 {
+				cuantos = "el enlace entre routers: usa"
+			}
+			return invalido("La red de enlaces seriales %s no alcanza para %s una red /30 (4 direcciones) y en total "+
+				"se necesitan %d. Tiene %d: faltan %d direcciones. Usa un prefijo /%d o menor.",
+				serial, cuantos, total, tamano(serial), total-uint64(tamano(serial)), prefijoPara(total))
+		}
 	}
 	return nil
 }

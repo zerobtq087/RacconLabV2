@@ -138,16 +138,22 @@ func TestErrores(t *testing.T) {
 		{"nombre con comillas", "basica", "nombre del laboratorio", func(s *domain.SolicitudDespliegue) { s.NombreLab = "lab';rm" }},
 		{"protocolo", "basica", "RIP u OSPF", func(s *domain.SolicitudDespliegue) { s.RoutingProtocol = "eigrp" }},
 		{"área negativa", "basica", "área OSPF", func(s *domain.SolicitudDespliegue) { s.OspfArea = -1 }},
-		{"CIDR inválido", "basica", "no es una red IPv4", func(s *domain.SolicitudDespliegue) { s.Subnet = "192.168.1.300/24" }},
-		{"no es red", "basica", "usa 192.168.1.0/24", func(s *domain.SolicitudDespliegue) { s.Subnet = "192.168.1.5/24" }},
-		{"serial chica", "intermedia", "no alcanza", func(s *domain.SolicitudDespliegue) { s.SerialSubnet = "10.0.0.0/29" }},
+		{"CIDR inválido", "basica", "no es una IP con prefijo válida", func(s *domain.SolicitudDespliegue) { s.Subnet = "192.168.1.300/24" }},
+		{"serial chica", "intermedia", "faltan 8 direcciones", func(s *domain.SolicitudDespliegue) { s.SerialSubnet = "10.0.0.0/29" }},
 		{"sin serial", "intermedia", "enlaces seriales", func(s *domain.SolicitudDespliegue) { s.SerialSubnet = "" }},
-		{"LAN chica", "intermedia", "no alcanza", func(s *domain.SolicitudDespliegue) { s.Subnet = "192.168.0.0/23" }},
+		{"LAN chica", "intermedia", "faltan 32 direcciones. Usa un prefijo /26", func(s *domain.SolicitudDespliegue) { s.Subnet = "192.168.0.0/27" }},
+		{"LAN básica chica", "basica", "se necesitan 32. Tiene 16: faltan 16", func(s *domain.SolicitudDespliegue) { s.Subnet = "192.168.0.0/28" }},
+		{"VLAN muy chica", "avanzada", "VLAN 10 (192.168.10.0/29) es muy chica", func(s *domain.SolicitudDespliegue) {
+			s.Vlans = []domain.Vlan{
+				{ID: 10, Subnet: "192.168.10.0/29", Gateway: "192.168.10.1"},
+				{ID: 20, Subnet: "192.168.20.0/24", Gateway: "192.168.20.1"},
+			}
+		}},
 		{"falta VLAN", "avanzada", "VLAN 10", func(s *domain.SolicitudDespliegue) {}},
 		{"VLAN fuera de rango", "avanzada", "1 a 4094", func(s *domain.SolicitudDespliegue) {
 			s.Vlans = []domain.Vlan{{ID: 5000, Subnet: "192.168.10.0/24", Gateway: "192.168.10.1"}}
 		}},
-		{"gateway fuera", "avanzada", "no es un host", func(s *domain.SolicitudDespliegue) {
+		{"gateway fuera", "avanzada", "usa una IP de 192.168.10.1 a 192.168.10.254", func(s *domain.SolicitudDespliegue) {
 			s.Vlans = []domain.Vlan{{ID: 10, Subnet: "192.168.10.0/24", Gateway: "192.168.11.1"}}
 		}},
 		{"redes encimadas", "avanzada", "se enciman", func(s *domain.SolicitudDespliegue) {
@@ -167,5 +173,62 @@ func TestErrores(t *testing.T) {
 				t.Errorf("error = %v; se esperaba uno que dijera %q", err, c.contiene)
 			}
 		})
+	}
+}
+
+// Cualquier IP con su prefijo sirve: se calcula la red (no es error escribir una IP de host)
+func TestRedesCualquierIP(t *testing.T) {
+	// IP de host: 192.200.100.50/16 → red 192.200.0.0/16 (la LAN de la básica queda en /24)
+	topo, err := resolver(t, "basica", domain.SolicitudDespliegue{NombreLab: "Lab_X", Subnet: "192.200.100.50/16", RoutingProtocol: "rip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ip(t, topo, "R1", "FastEthernet0/0"); got != "192.200.0.1 255.255.255.0" || topo.ProjectSettings.Subnet != "192.200.0.0/16" {
+		t.Errorf("R1 = %s, subnet guardada = %s", got, topo.ProjectSettings.Subnet)
+	}
+
+	// Redes públicas y prefijos poco comunes, si alcanzan
+	topo, err = resolver(t, "intermedia", domain.SolicitudDespliegue{NombreLab: "Lab_X", Subnet: "8.8.0.0/22", SerialSubnet: "1.2.3.4/28", RoutingProtocol: "ospf"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ip(t, topo, "R4", "FastEthernet1/0"); got != "8.8.2.1 255.255.255.0" {
+		t.Errorf("R4 = %s", got)
+	}
+	if got := ip(t, topo, "R5", "Serial2/3"); got != "1.2.3.14 255.255.255.252" {
+		t.Errorf("R5 serial = %s", got)
+	}
+
+	// Una /24 para las 4 LAN de la intermedia: se divide en 4 redes /26
+	topo, err = resolver(t, "intermedia", domain.SolicitudDespliegue{NombreLab: "Lab_X", Subnet: "172.20.5.99/24", SerialSubnet: "10.0.0.0/28", RoutingProtocol: "rip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ip(t, topo, "R3", "FastEthernet1/0"); got != "172.20.5.65 255.255.255.192" {
+		t.Errorf("R3 = %s (debía ser la 2a /26)", got)
+	}
+	if h := nodo(t, topo, "Host04"); h.IP != "172.20.5.202" || h.Prefix != 26 || h.Gateway != "172.20.5.193" {
+		t.Errorf("Host04 = %s/%d gw %s", h.IP, h.Prefix, h.Gateway)
+	}
+
+	// VLAN escrita con IP de host
+	topo, err = resolver(t, "avanzada", domain.SolicitudDespliegue{NombreLab: "Lab_X", Subnet: "10.9.9.9/24", SerialSubnet: "10.0.0.0/24", RoutingProtocol: "ospf",
+		Vlans: []domain.Vlan{{ID: 10, Subnet: "192.168.10.77/24", Gateway: "192.168.10.1"}, {ID: 20, Subnet: "192.168.20.0/24", Gateway: "192.168.20.254"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if topo.ProjectSettings.Vlans[0].Subnet != "192.168.10.0/24" || nodo(t, topo, "Host03").Gateway != "192.168.20.254" {
+		t.Errorf("VLAN: %+v", topo.ProjectSettings.Vlans)
+	}
+}
+
+func TestInfoDeRed(t *testing.T) {
+	i, err := InfoDeRed("192.200.100.50/16", "Red LAN")
+	if err != nil || i.Red != "192.200.0.0/16" || i.Mascara != "255.255.0.0" || i.PrimerHost != "192.200.0.1" ||
+		i.UltimoHost != "192.200.255.254" || i.Hosts != 65534 {
+		t.Errorf("%+v %v", i, err)
+	}
+	if _, err := InfoDeRed("10.0.0.1/31", "Red LAN"); err == nil {
+		t.Error("/31 no deja hosts")
 	}
 }
