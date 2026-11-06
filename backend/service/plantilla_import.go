@@ -64,6 +64,12 @@ func plantillaCSV(filas [][]string) ([]byte, error) {
 // plantillaXLSX escribe un .xlsx mínimo: es un .zip con 5 XML. Todas las celdas
 // van como texto (inlineStr) para que Excel no convierta las matrículas en números.
 func plantillaXLSX(filas [][]string) ([]byte, error) {
+	return escribirXLSX("usuarios", filas, nil)
+}
+
+// escribirXLSX arma un .xlsx de una hoja; las columnas en "numericas" se
+// escriben como número (para que Excel pueda sacar promedios)
+func escribirXLSX(nombreHoja string, filas [][]string, numericas map[int]bool) ([]byte, error) {
 	const (
 		cabecera = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` + "\n"
 		nsMain   = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -77,6 +83,10 @@ func plantillaXLSX(filas [][]string) ([]byte, error) {
 	for i, fila := range filas {
 		fmt.Fprintf(&hoja, `<row r="%d">`, i+1)
 		for j, valor := range fila {
+			if numericas[j] && i > 0 && valor != "" {
+				fmt.Fprintf(&hoja, `<c r="%c%d"><v>%s</v></c>`, 'A'+j, i+1, valor)
+				continue
+			}
 			fmt.Fprintf(&hoja, `<c r="%c%d" t="inlineStr"><is><t>`, 'A'+j, i+1)
 			if err := xml.EscapeText(&hoja, []byte(valor)); err != nil {
 				return nil, err
@@ -97,7 +107,7 @@ func plantillaXLSX(filas [][]string) ([]byte, error) {
 		{"_rels/.rels", cabecera + `<Relationships xmlns="` + nsRels + `">` +
 			`<Relationship Id="rId1" Type="` + nsDoc + `/officeDocument" Target="xl/workbook.xml"/></Relationships>`},
 		{"xl/workbook.xml", cabecera + `<workbook xmlns="` + nsMain + `" xmlns:r="` + nsDoc + `">` +
-			`<sheets><sheet name="usuarios" sheetId="1" r:id="rId1"/></sheets></workbook>`},
+			`<sheets><sheet name="` + nombreHoja + `" sheetId="1" r:id="rId1"/></sheets></workbook>`},
 		{"xl/_rels/workbook.xml.rels", cabecera + `<Relationships xmlns="` + nsRels + `">` +
 			`<Relationship Id="rId1" Type="` + nsDoc + `/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`},
 		{"xl/worksheets/sheet1.xml", hoja.String()},

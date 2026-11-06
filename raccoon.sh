@@ -34,6 +34,9 @@ REPARAR_RED="/usr/local/sbin/raccoon-red"   # repara la red (se puede correr a m
 NFT_ARCHIVO="/etc/raccoon-lab/solo-lan.nft" # filtro "solo LAN" de los puertos de contenedores
 DOCKER_DROPIN="/etc/systemd/system/docker.service.d/raccoon-podman.conf"
 UNIDAD_RED="/etc/systemd/system/raccoon-red.service"
+AGENTE_ACCESOS="/usr/local/sbin/raccoon-accesos"           # abre los puertos de cada lab a sus IPs
+UNIDAD_ACCESOS="/etc/systemd/system/raccoon-accesos.service"
+ACCESOS_NFT="/run/raccoon/accesos.nft"                    # última lista aplicada (se pierde al reiniciar)
 
 # Lo que el usuario todavía tiene que hacer (se muestra en el resumen final)
 PENDIENTES=()
@@ -251,6 +254,24 @@ EOF
         info "Creado $VISTA/.env con contraseñas aleatorias"
     fi
 
+    # Agregados en versiones nuevas: se añaden a un .env viejo sin tocar lo demás
+    if ! grep -q '^ACCESOS_TOKEN=' "$ENV_FILE"; then
+        cat >> "$ENV_FILE" <<EOF
+
+# Clave del agente del firewall (raccoon-accesos) para pedir a la API qué IPs
+# pueden usar los puertos de cada laboratorio
+ACCESOS_TOKEN=$(secreto 32)
+
+# Límites de las prácticas (0 = sin límite)
+PRACTICA_MAX_ROUTERS=0
+PRACTICA_MAX_HOSTS=0
+PRACTICA_MAX_MB=0
+# Revisiones de entregas a la vez en todo el servidor (0 = sin cola)
+REVISIONES_SIMULTANEAS=0
+EOF
+        info "Se agregó ACCESOS_TOKEN y los límites de prácticas al .env"
+    fi
+
     set -a
     # shellcheck disable=SC1090
     . "$ENV_FILE"
@@ -367,13 +388,21 @@ instalar_reparar_red() {
     cat > "$NFT_ARCHIVO" <<EOF || r=1
 # Generado por raccoon.sh: puertos publicados por contenedores solo desde la LAN.
 # Prioridad "raw" (-300): se revisa antes del DNAT de Docker y Podman (-100).
+# Los puertos de los labs además solo se abren a las IPs del set "acceso"
+# (IP . bloque de puertos), que llena raccoon-accesos con lo que dice la API.
 table inet raccoon
 delete table inet raccoon
 table inet raccoon {
+    set acceso {
+        type ipv4_addr . inet_service
+        flags interval
+    }
     chain solo_lan {
         type filter hook prerouting priority raw; policy accept;
         iifname "$IFACE" ip saddr != $LAN tcp dport { 80, ${GNS3_BASE_PORT}-${LAB_FIN} } drop
         iifname "$IFACE" meta nfproto ipv6 tcp dport { 80, ${GNS3_BASE_PORT}-${LAB_FIN} } drop
+        iifname "$IFACE" tcp dport ${GNS3_BASE_PORT}-${LAB_FIN} ip saddr . tcp dport @acceso accept
+        iifname "$IFACE" tcp dport ${GNS3_BASE_PORT}-${LAB_FIN} drop
     }
 }
 EOF
@@ -410,6 +439,8 @@ case "\${1:-todo}" in
     *)
         r=0
         nft -f "\$NFT_ARCHIVO" || { echo "raccoon-red: no se cargó el filtro solo-LAN" >&2; r=1; }
+        # recargar la tabla vacía el set: se vuelve a poner la última lista de accesos
+        $AGENTE_ACCESOS aplicar || true
         reglas_docker || r=1
         podman network reload --all >/dev/null || { echo "raccoon-red: falló podman network reload" >&2; r=1; }
         exit \$r ;;
@@ -442,8 +473,11 @@ ExecStart=$REPARAR_RED
 WantedBy=multi-user.target
 EOF
 
+    instalar_agente_accesos || r=1
+
     systemctl daemon-reload || r=1
     systemctl enable -q raccoon-red.service || r=1
+    systemctl enable -q raccoon-accesos.service || r=1
 
     # Aplicarlo ya (sin reiniciar Docker ni los laboratorios)
     if "$REPARAR_RED"; then
@@ -451,7 +485,101 @@ EOF
     else
         r=1
     fi
+    # Se reinicia para que tome la versión nueva del agente y la clave del .env
+    systemctl restart raccoon-accesos.service || r=1
     return $r
+}
+
+# ---------------------------------------------------------------------
+#  7b. Agente raccoon-accesos: filtro dinámico de los puertos de los labs
+#
+#  La API (en Podman) no puede tocar el firewall del servidor, así que este
+#  agente le pregunta cada 2 s qué IPs pueden usar cada bloque de puertos:
+#  las de los usuarios con sesión web vigente que son dueños o miembros del
+#  lab (y el docente mientras supervisa). Con eso reemplaza el set "acceso"
+#  en una sola transacción de nftables (flush + add, sin huecos).
+#  Si la API no responde, deja el set como estaba.
+# ---------------------------------------------------------------------
+instalar_agente_accesos() {
+    cat > "$AGENTE_ACCESOS" <<EOF || return 1
+#!/bin/bash
+# Generado por raccoon.sh: abre los puertos de cada laboratorio solo a las IPs
+# de los usuarios con sesión iniciada que tienen acceso a ese laboratorio.
+#   raccoon-accesos           bucle (lo corre raccoon-accesos.service)
+#   raccoon-accesos aplicar   vuelve a cargar la última lista (lo usa raccoon-red)
+#   raccoon-accesos ver       muestra el set actual
+ENV_FILE="$PROD_DIR/.env"
+ARCHIVO="$ACCESOS_NFT"
+PUERTO_HTTP="$HTTP_PORT"
+IP_SERVIDOR="$IP"
+# Solo se aceptan líneas "IPv4 . inicio-fin" (nada más entra a nftables)
+VALIDA='^[0-9]{1,3}(\.[0-9]{1,3}){3} \. [0-9]{1,5}-[0-9]{1,5}\$'
+
+aplicar() {
+    [[ -f "\$ARCHIVO" ]] && nft -f "\$ARCHIVO"
+}
+
+# escribir LISTA: arma el archivo con flush + add (una sola transacción)
+escribir() {
+    local elementos
+    elementos=\$(paste -sd, - <<< "\$1")
+    mkdir -p "\$(dirname "\$ARCHIVO")"
+    {
+        echo "flush set inet raccoon acceso"
+        if [[ -n "\$1" ]]; then
+            echo "add element inet raccoon acceso { \$elementos }"
+        fi
+    } > "\$ARCHIVO.tmp" && mv "\$ARCHIVO.tmp" "\$ARCHIVO"
+}
+
+pedir() {
+    local token url
+    token=\$(grep -m1 '^ACCESOS_TOKEN=' "\$ENV_FILE" | cut -d= -f2-)
+    [[ -n "\$token" ]] || return 1
+    for url in "http://127.0.0.1:\$PUERTO_HTTP" "http://\$IP_SERVIDOR:\$PUERTO_HTTP"; do
+        curl -sf --max-time 4 -H "X-Raccoon-Token: \$token" "\$url/api/interno/accesos" && return 0
+    done
+    return 1
+}
+
+case "\${1:-bucle}" in
+    aplicar) aplicar ;;
+    ver) nft list set inet raccoon acceso ;;
+    *)
+        anterior="(nada)" vueltas=0
+        while true; do
+            if respuesta=\$(pedir); then
+                lista=\$(grep -E "\$VALIDA" <<< "\$respuesta" | sort -u)
+                # Se aplica si cambió, y cada 30 s aunque no cambie (por si recargaron la tabla)
+                if [[ "\$lista" != "\$anterior" || \$vueltas -ge 15 ]]; then
+                    escribir "\$lista"
+                    if aplicar; then
+                        [[ "\$lista" != "\$anterior" ]] && echo "accesos: \$(grep -c . <<< "\$lista") IP/lab"
+                        anterior="\$lista" vueltas=0
+                    fi
+                fi
+            fi
+            vueltas=\$((vueltas + 1))
+            sleep 2
+        done ;;
+esac
+EOF
+    chmod 755 "$AGENTE_ACCESOS" || return 1
+
+    cat > "$UNIDAD_ACCESOS" <<EOF || return 1
+# Generado por raccoon.sh: filtro dinámico de los puertos de los laboratorios
+[Unit]
+Description=Raccoon Lab: abre los puertos de cada lab solo a las IPs con sesión
+After=raccoon-red.service network-online.target
+
+[Service]
+ExecStart=$AGENTE_ACCESOS
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
 }
 
 # ---------------------------------------------------------------------
@@ -721,6 +849,15 @@ autoprueba() {
         aviso "El filtro solo-LAN no está cargado"
         pendiente "El filtro solo-LAN no está cargado. Corre: raccoon-red"
     fi
+
+    # 7) Filtro dinámico: la API entrega la lista con la clave y el agente corre
+    codigo=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H "X-Raccoon-Token: $ACCESOS_TOKEN" "$url/api/interno/accesos" || true)
+    if [[ "$codigo" == "200" ]] && systemctl is-active -q raccoon-accesos.service && nft list set inet raccoon acceso >/dev/null 2>&1; then
+        bien "Filtro dinámico activo: los puertos de cada lab solo abren a las IPs con sesión (raccoon-accesos ver)"
+    else
+        aviso "El filtro dinámico no está listo (API: HTTP $codigo, agente: $(systemctl is-active raccoon-accesos.service))"
+        pendiente "Revisa el agente del firewall: systemctl status raccoon-accesos  y  journalctl -u raccoon-accesos"
+    fi
 }
 
 # ---------------------------------------------------------------------
@@ -872,6 +1009,7 @@ resumen() {
   Bitácora        : $LOG
   Ver servicios   : podman ps   |   Labs: docker ps
   Si la página deja de cargar (p. ej. tras "firewall-cmd --reload"): raccoon-red
+  Puertos de los labs: solo abren a la IP con sesión en la página (raccoon-accesos ver)
 =====================================================================
 EOF
 

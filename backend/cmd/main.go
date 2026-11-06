@@ -46,12 +46,18 @@ func main() {
 		CookieHTTPOnly:  true,
 		CookieSameSite:  "Lax",
 	})
-	sess := middleware.NewSession(store, storage)
+	sess := middleware.NewSession(store, storage, repository.NewAccesoRepository(db))
 
 	// Fiber Web server (solo API: el frontend lo sirve su propio contenedor)
 	app := fiber.New(fiber.Config{
 		AppName:   "Raccoon Lab " + env.AppID,
 		BodyLimit: 20 * 1024 * 1024, // archivos CSV/Excel de hasta 20 MB
+		// La IP real del usuario la manda Nginx en X-Real-IP. Solo se le cree a
+		// Nginx (red de Podman) y a localhost: un cliente no puede falsificarla.
+		// Esa IP es la que el firewall deja entrar a los puertos de su lab.
+		TrustProxy:       true,
+		TrustProxyConfig: fiber.TrustProxyConfig{Proxies: []string{"10.88.0.0/15"}, Loopback: true},
+		ProxyHeader:      "X-Real-IP",
 	})
 	app.Use(helmet.New())
 

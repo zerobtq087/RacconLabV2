@@ -27,6 +27,16 @@ type Env struct {
 	GNS3Port     int    // primer puerto del rango de laboratorios
 	LabPuertos   int    // puertos por laboratorio (1 de GNS3 + consolas)
 	LabsMax      int    // laboratorios al mismo tiempo
+
+	// Firewall dinámico: el agente del servidor (raccoon-accesos) pide con esta
+	// clave la lista de IPs que pueden usar cada lab. Vacía = desactivado.
+	AccesosToken string
+
+	// Límites de las prácticas (0 = sin límite; desactivados por defecto)
+	PracticaMaxRouters    int // routers por práctica
+	PracticaMaxHosts      int // hosts por práctica
+	PracticaMaxMB         int // tamaño del proyecto exportado
+	RevisionesSimultaneas int // revisiones de entregas a la vez en todo el servidor
 }
 
 // LoadConfig regresa un puntero: toda la app comparte la MISMA configuración
@@ -54,6 +64,13 @@ func LoadConfig() *Env {
 		GNS3Port:     entero("GNS3_BASE_PORT", 30000),
 		LabPuertos:   entero("LAB_PUERTOS", 40),
 		LabsMax:      entero("LABS_MAX", 60),
+
+		AccesosToken: os.Getenv("ACCESOS_TOKEN"),
+
+		PracticaMaxRouters:    entero("PRACTICA_MAX_ROUTERS", 0),
+		PracticaMaxHosts:      entero("PRACTICA_MAX_HOSTS", 0),
+		PracticaMaxMB:         entero("PRACTICA_MAX_MB", 0),
+		RevisionesSimultaneas: entero("REVISIONES_SIMULTANEAS", 0),
 	}
 
 	validarVolumenes(env.GNS3Volumes)

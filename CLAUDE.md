@@ -137,10 +137,28 @@ Carpetas como fiber3: backend/{cmd,config,database,domain,repository,handler,mid
   (las imágenes son para fondo oscuro). La calculadora de redes se quitó.
 - "Host requires authentication" en GNS3 de escritorio = el cliente reintenta con el token del lab
   anterior tras Limpiar/crear (token nuevo); se arregla poniendo el token nuevo en Preferences.
+- Prácticas con calificación (probado en la laptop con profesor, 2 alumnos en equipo, uno que se une
+  después y uno de otro grupo). Migración 003. service/practicas.go: el profesor crea la práctica desde
+  un proyecto de SU lab (write memory, detener, exportar; se quitan los .ghost de Dynamips → ~80 KB),
+  criterios con puntos (service/criterios.go valida, lee salidas y califica; pruebas en criterios_test.go;
+  service/revisor.go los evalúa por consola telnet, docker exec o API de GNS3, nodos por NOMBRE),
+  "Probar con mi solución", activar, cerrar (no se reabre). El alumno abre una copia importada en su lab
+  (avisa si hay otra topología encendida) y entrega UNA vez: revisión en segundo plano (REVISIONES con
+  LAB_ACTIVO UNIQUE, latido, cola opcional REVISIONES_SIMULTANEAS), se guardan running-configs y copia
+  del proyecto, se borra del lab y cuenta para el equipo de ESE momento que no había entregado.
+  Si falla, no cuenta. Tabla A tiempo / "X tarde" / Pendiente y Excel. Límites en .env (0 = sin límite).
+  Ojo Firebird: COALESCE(UUID_TO_CHAR(x), '') rellena con espacios → usar TRIM; un BLOB se lee en struct.
+- Supervisión (service/supervision.go): docente del grupo o admin ve labs, proyectos y configs
+  (guardada o actual por consola), descarga/copia (si está encendido pide "detener"), abre consolas
+  30 min; nunca recibe el token. Todo queda en SUPERVISIONES (bitácora).
+- Filtro dinámico del firewall: el middleware guarda la IP de cada sesión en SESIONES_IP (TrustProxy
+  con X-Real-IP de Nginx); GET /api/interno/accesos (clave ACCESOS_TOKEN) da "IP . bloque" de dueños,
+  miembros y docentes supervisando; el agente /usr/local/sbin/raccoon-accesos (servicio, cada 2 s)
+  reemplaza el set nft `acceso` de la tabla inet raccoon; los puertos de labs se cierran a todo lo demás.
+  raccoon-red lo restaura; si la API cae se conserva el último. Probado en contenedor Rocky 9.
 
 ## Pendiente (en este orden)
-1. Probar en la VM: Avanzada y modo cooperativo (en la escuela).
-2. Prácticas con calificación (plan en revisión; la IA con Qwen se quitó del proyecto, de acuerdo con el profe).
+1. Probar en la VM: prácticas, supervisión y filtro dinámico (y Avanzada y modo cooperativo, en la escuela).
 
 ## Proyectos de referencia (solo leer, NUNCA modificar ni copiar su estructura)
 - ~/GoProjects/fiber3 → proyecto del profe. ES EL MODELO a seguir para backend

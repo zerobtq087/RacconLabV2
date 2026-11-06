@@ -88,6 +88,51 @@ func SetupRoutes(app *fiber.App, env *config.Env, db *gorm.DB, s *middleware.Ses
 	plantillas.Get("/despliegue", plantillaHandler.Estado)
 	plantillas.Post("/redes", plantillaHandler.Redes)
 
+	// Prácticas con calificación: el profesor (o admin) las arma desde un proyecto de su lab
+	practicaRepo := repository.NewPracticaRepository(db)
+	practicaHandler := handler.NewPracticaHandler(service.NewPracticas(practicaRepo, laboratorioRepo, docker, env))
+	practicas := api.Group("/practicas", s.Validate, adminProfesor)
+	practicas.Get("/", practicaHandler.Listar)
+	practicas.Get("/proyectos", practicaHandler.Proyectos) // antes de /:id
+	practicas.Post("/", practicaHandler.Crear)
+	practicas.Get("/:id", practicaHandler.Detalle)
+	practicas.Put("/:id", practicaHandler.Editar)
+	practicas.Delete("/:id", practicaHandler.Borrar)
+	practicas.Put("/:id/criterios", practicaHandler.Criterios)
+	practicas.Post("/:id/activar", practicaHandler.Activar)
+	practicas.Post("/:id/cerrar", practicaHandler.Cerrar)
+	practicas.Post("/:id/prueba", practicaHandler.Probar)
+	practicas.Get("/:id/prueba", practicaHandler.Prueba)
+	practicas.Get("/:id/entregas", practicaHandler.Entregas)
+	practicas.Get("/:id/excel", practicaHandler.Excel)
+	practicas.Get("/:id/entregas/:alumno", practicaHandler.Entrega)
+	practicas.Get("/:id/entregas/:alumno/proyecto", practicaHandler.ProyectoEntrega)
+	practicas.Post("/:id/entregas/:alumno/abrir", practicaHandler.AbrirEntrega)
+
+	// El alumno abre la práctica en su lab y la entrega una sola vez
+	misPracticas := api.Group("/mis-practicas", s.Validate, s.RequireRol("ALUMNO"))
+	misPracticas.Get("/", practicaHandler.MisPracticas)
+	misPracticas.Post("/:id/abrir", practicaHandler.Abrir)
+	misPracticas.Post("/:id/entregar", practicaHandler.Entregar)
+
+	// Supervisión: el docente/admin ve los labs de sus alumnos (sin su token)
+	accesoRepo := repository.NewAccesoRepository(db)
+	supervisionHandler := handler.NewSupervisionHandler(
+		service.NewSupervision(practicaRepo, accesoRepo, laboratorioRepo, docker, env))
+	supervision := api.Group("/supervision", s.Validate, adminProfesor)
+	supervision.Get("/bitacora", supervisionHandler.Bitacora)
+	supervision.Get("/grupos/:grupo", supervisionHandler.Alumnos)
+	supervision.Get("/labs/:lab/proyectos", supervisionHandler.Proyectos)
+	supervision.Get("/labs/:lab/proyectos/:proyecto/nodos", supervisionHandler.Nodos)
+	supervision.Get("/labs/:lab/proyectos/:proyecto/descargar", supervisionHandler.Descargar)
+	supervision.Post("/labs/:lab/proyectos/:proyecto/copiar", supervisionHandler.Copiar)
+	supervision.Post("/labs/:lab/consolas", supervisionHandler.Consolas)
+	supervision.Delete("/labs/:lab/consolas", supervisionHandler.CerrarConsolas)
+
+	// Interno: el agente del firewall (raccoon-accesos) pide las IPs con acceso a
+	// cada lab. Sin sesión; lo protege la clave ACCESOS_TOKEN del .env.
+	api.Get("/interno/accesos", handler.NewInternoHandler(accesoRepo, env).Accesos)
+
 	// Monitor de laboratorios (solo admin)
 	api.Get("/monitor", s.Validate, admin, laboratorioHandler.Monitor)
 	api.Delete("/monitor/:id", s.Validate, admin, laboratorioHandler.Close)

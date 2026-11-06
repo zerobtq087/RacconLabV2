@@ -70,6 +70,9 @@ const menuItems: menuItem[] = [
   { icon: 'mdi-account-group-outline', text: 'Grupos', to: '/grupos', roles: ['ADMIN', 'PROFESOR'] },
   { icon: 'mdi-lan', text: 'Mi laboratorio', to: '/laboratorio', roles: ['ALUMNO', 'PROFESOR'] },
   { icon: 'mdi-sitemap-outline', text: 'Plantillas', to: '/plantillas', roles: ['PROFESOR'] },
+  { icon: 'mdi-clipboard-check-outline', text: 'Prácticas', to: '/practicas', roles: ['ADMIN', 'PROFESOR'] },
+  { icon: 'mdi-clipboard-check-outline', text: 'Mis prácticas', to: '/mis-practicas', roles: ['ALUMNO'] },
+  { icon: 'mdi-account-search-outline', text: 'Supervisión', to: '/supervision', roles: ['ADMIN', 'PROFESOR'] },
   { icon: 'mdi-monitor-eye', text: 'Monitor', to: '/monitor', roles: ['ADMIN'] },
   { icon: 'mdi-cog-outline', text: 'Mi cuenta', to: '/settings', roles: ['ADMIN', 'PROFESOR', 'ALUMNO'] },
 ]

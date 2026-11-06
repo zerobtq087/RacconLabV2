@@ -36,6 +36,12 @@ x-api-env: &api-env
   GNS3_BASE_PORT: ${GNS3_BASE_PORT}
   LAB_PUERTOS: ${LAB_PUERTOS}
   LABS_MAX: ${LABS_MAX}
+  # Agente del firewall (raccoon-accesos) y límites de las prácticas (0 = sin límite)
+  ACCESOS_TOKEN: ${ACCESOS_TOKEN}
+  PRACTICA_MAX_ROUTERS: ${PRACTICA_MAX_ROUTERS:-0}
+  PRACTICA_MAX_HOSTS: ${PRACTICA_MAX_HOSTS:-0}
+  PRACTICA_MAX_MB: ${PRACTICA_MAX_MB:-0}
+  REVISIONES_SIMULTANEAS: ${REVISIONES_SIMULTANEAS:-0}
   TZ: ${TZ}
 
 services:

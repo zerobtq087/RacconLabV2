@@ -3,6 +3,10 @@ package middleware
 import (
 	"context"
 	"slices"
+	"strconv"
+	"time"
+
+	"raccoon-lab/backend/repository"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/session"
@@ -11,13 +15,41 @@ import (
 
 // Session es lo ÚNICO que toca la sesión de Redis.
 // Los handlers leen los datos con c.Locals(...)
+// accesos guarda en Firebird la IP de cada sesión: el firewall abre los puertos
+// del lab solo a las IPs con sesión (ver repository/acceso_repo.go).
 type Session struct {
 	store   *session.Store
 	storage *redis.Storage
+	accesos *repository.AccesoRepository
 }
 
-func NewSession(store *session.Store, storage *redis.Storage) *Session {
-	return &Session{store: store, storage: storage}
+func NewSession(store *session.Store, storage *redis.Storage, accesos *repository.AccesoRepository) *Session {
+	return &Session{store: store, storage: storage, accesos: accesos}
+}
+
+// cadaCuanto: cada cuánto se renueva la sesión con IP en Firebird si no cambia la IP
+const cadaCuanto = 2 * time.Minute
+
+// recordarIP guarda la IP de la sesión en Firebird si cambió o ya pasó "cadaCuanto"
+// (así no se escribe en la base en cada petición)
+func (s *Session) recordarIP(c fiber.Ctx, sess *session.Session, userID string) {
+	ip := c.IP() // la del navegador (Nginx la manda en X-Real-IP)
+	if ip == "" {
+		// sin Nginx (desarrollo) no viene X-Real-IP: se usa la de la conexión
+		ip = c.RequestCtx().RemoteIP().String()
+	}
+	visto, _ := strconv.ParseInt(stringDe(sess.Get("visto")), 10, 64)
+	if stringDe(sess.Get("ip")) == ip && time.Since(time.Unix(visto, 0)) < cadaCuanto {
+		return
+	}
+	s.accesos.GuardarSesion(sess.ID(), userID, ip)
+	sess.Set("ip", ip)
+	sess.Set("visto", strconv.FormatInt(time.Now().Unix(), 10))
+}
+
+func stringDe(v any) string {
+	s, _ := v.(string)
+	return s
 }
 
 // clave en Redis con las sesiones abiertas de un usuario
@@ -38,6 +70,9 @@ func (s *Session) Validate(c fiber.Ctx) error {
 	if userID == nil {
 		return c.Status(fiber.StatusUnauthorized).SendString("No autorizado")
 	}
+
+	// La IP de esta sesión abre los puertos de su lab en el firewall
+	s.recordarIP(c, sess, stringDe(userID))
 
 	// Pasa datos a los siguientes handlers mediante Locals
 	c.Locals("sessionID", sess.ID())
@@ -75,13 +110,18 @@ func (s *Session) Create(c fiber.Ctx, userID, matricula, nombre, rol string) err
 	defer sess.Release()
 
 	// Nuevo ID de sesión en cada login
+	// Si en esta computadora había otra sesión, su IP deja de abrir aquel lab
+	anterior := sess.ID()
 	if err := sess.Regenerate(); err != nil {
 		return err
 	}
+	s.accesos.QuitarSesion(anterior)
+	sess.Set("visto", "0") // fuerza a guardar la IP con el ID nuevo
 	sess.Set("userID", userID)
 	sess.Set("matricula", matricula)
 	sess.Set("nombre", nombre)
 	sess.Set("rol", rol)
+	s.recordarIP(c, sess, userID)
 
 	// Guardar la sesión (esto envía la cookie al cliente)
 	if err := sess.Save(); err != nil {
@@ -103,6 +143,7 @@ func (s *Session) Destroy(c fiber.Ctx) error {
 	if userID, ok := sess.Get("userID").(string); ok {
 		s.storage.Conn().SRem(c.Context(), indice(userID), sess.ID())
 	}
+	s.accesos.QuitarSesion(sess.ID()) // se cierran los puertos de su lab para esa IP
 	return sess.Destroy()
 }
 
@@ -122,5 +163,6 @@ func (s *Session) CloseAll(ctx context.Context, userID, excepto string) error {
 		_ = s.store.Delete(ctx, id)
 		conn.SRem(ctx, indice(userID), id)
 	}
+	s.accesos.QuitarSesiones(userID, excepto)
 	return nil
 }
