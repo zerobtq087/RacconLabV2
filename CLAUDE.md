@@ -39,8 +39,12 @@ Carpetas como fiber3: backend/{cmd,config,database,domain,repository,handler,mid
 - Normalizada (3FN), catálogos en vez de CHECK. Sin CREATE INDEX (solo PK/UNIQUE/FK).
 - La aplica el contenedor de Firebird al crear la base (/docker-entrypoint-initdb.d/01-esquema.sql).
 - Roles: ADMIN puede entrar como admin/maestro/alumno; PROFESOR como maestro/alumno; ALUMNO solo alumno.
-- Nadie se registra: el admin importa CSV/Excel (alumnos: matricula,nombre,contrasenia,grupo,carrera;
-  maestros/admins: clave,nombre,contrasenia). Roles por tipo en TIPO_ROLES.
+- Nadie se registra: el admin importa CSV/Excel o agrega a mano en Usuarios. Columnas (plantillas
+  descargables, mismas que acepta el importador con sus sinónimos): alumnos matricula,nombre,contraseña,
+  grupo,carrera; maestros/admins matricula,nombre,contraseña; general (TIPOS_IMPORTACION) además "tipo"
+  por fila (ALUMNO/PROFESOR/ADMIN; grupo obligatorio solo para ALUMNO). Roles por tipo en TIPO_ROLES.
+  La carrera es del GRUPO (GRUPOS.ID_CARRERA), no del usuario.
+- Bases ya creadas: docs/migraciones/*.sql (idempotentes; raccoon.sh las corre por localhost:).
 - Admin general = ADMIN_USER del .env ("admin"), protegido: no se edita ni se borra.
 
 ## Frontend: Vue 3 + Vuetify 4 + TypeScript (yarn create vuetify), Yarn 4.14.1
@@ -109,6 +113,10 @@ Carpetas como fiber3: backend/{cmd,config,database,domain,repository,handler,mid
   Edit config pone la IP; ping entre router y Ubuntu.
 - raccoon.sh probado en la VM Rocky 9.8 (4 vCPU, 8 GB, sin KVM): instala, levanta y se autoprueba.
 - Laboratorio.vue: copiar con respaldo execCommand (http sin HTTPS); el botón cambia a "Copiado" 2 s.
+- Usuarios (laptop): plantillas CSV/XLSX descargables (service/plantilla_import.go, XLSX escrito a mano),
+  importación "general", agregar/editar a mano (service/usuarios.go: mismas validaciones que el
+  importador; cierra sesiones si cambia contraseña, tipo, roles o matrícula, o se desactiva).
+  Usuarios.vue sin SweetAlert: formulario y avisos dentro de la página.
 - Plantillas (probado en la laptop: 3 topologías × RIP/OSPF, ping entre redes por los routers):
   POST/GET /api/plantillas/despliegue (solo PROFESOR, su lab CORRIENDO; contenedor y puerto los pone Go).
   service/topologia.go valida y calcula TODAS las direcciones (único lugar; pruebas en topologia_test.go);

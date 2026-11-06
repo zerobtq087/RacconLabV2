@@ -1,0 +1,63 @@
+-- =====================================================================
+--  Migración 002: importación "general" (cada fila trae su tipo)
+--
+--  IMPORTACIONES.TIPO apuntaba a TIPOS_USUARIO, pero "general" es un tipo de
+--  ARCHIVO, no de usuario. Se crea el catálogo TIPOS_IMPORTACION y la FK de
+--  IMPORTACIONES.TIPO pasa a apuntar a él. Idempotente (raccoon.sh la corre siempre).
+-- =====================================================================
+SET TERM ^ ;
+
+EXECUTE BLOCK AS
+BEGIN
+    IF (NOT EXISTS (SELECT 1 FROM RDB$RELATIONS WHERE RDB$RELATION_NAME = 'TIPOS_IMPORTACION')) THEN
+        EXECUTE STATEMENT '
+            CREATE TABLE TIPOS_IMPORTACION (
+                CLAVE        VARCHAR(10)  NOT NULL PRIMARY KEY,
+                DESCRIPCION  VARCHAR(40)  NOT NULL
+            )';
+END^
+
+SET TERM ; ^
+COMMIT;
+
+UPDATE OR INSERT INTO TIPOS_IMPORTACION VALUES ('alumnos',  'Alumnos')                 MATCHING (CLAVE);
+UPDATE OR INSERT INTO TIPOS_IMPORTACION VALUES ('maestros', 'Maestros')                MATCHING (CLAVE);
+UPDATE OR INSERT INTO TIPOS_IMPORTACION VALUES ('admins',   'Administradores')         MATCHING (CLAVE);
+UPDATE OR INSERT INTO TIPOS_IMPORTACION VALUES ('general',  'General (tipo por fila)') MATCHING (CLAVE);
+COMMIT;
+
+-- Quitar la FK vieja (IMPORTACIONES.TIPO -> TIPOS_USUARIO). Firebird le puso un
+-- nombre automático (INTEG_nn), así que se busca en el catálogo del sistema.
+SET TERM ^ ;
+
+EXECUTE BLOCK AS
+DECLARE nombre VARCHAR(63);
+BEGIN
+    FOR SELECT TRIM(RC.RDB$CONSTRAINT_NAME)
+        FROM RDB$RELATION_CONSTRAINTS RC
+        JOIN RDB$REF_CONSTRAINTS REF ON REF.RDB$CONSTRAINT_NAME = RC.RDB$CONSTRAINT_NAME
+        JOIN RDB$RELATION_CONSTRAINTS PK ON PK.RDB$CONSTRAINT_NAME = REF.RDB$CONST_NAME_UQ
+        JOIN RDB$INDEX_SEGMENTS S ON S.RDB$INDEX_NAME = RC.RDB$INDEX_NAME
+        WHERE RC.RDB$RELATION_NAME = 'IMPORTACIONES' AND RC.RDB$CONSTRAINT_TYPE = 'FOREIGN KEY'
+          AND S.RDB$FIELD_NAME = 'TIPO' AND PK.RDB$RELATION_NAME = 'TIPOS_USUARIO'
+        INTO :nombre
+    DO
+        EXECUTE STATEMENT 'ALTER TABLE IMPORTACIONES DROP CONSTRAINT ' || nombre;
+END^
+
+SET TERM ; ^
+COMMIT;
+
+-- Poner la FK nueva (IMPORTACIONES.TIPO -> TIPOS_IMPORTACION) si no está
+SET TERM ^ ;
+
+EXECUTE BLOCK AS
+BEGIN
+    IF (NOT EXISTS (SELECT 1 FROM RDB$RELATION_CONSTRAINTS
+                    WHERE RDB$CONSTRAINT_NAME = 'FK_IMPORTACIONES_TIPO')) THEN
+        EXECUTE STATEMENT 'ALTER TABLE IMPORTACIONES ADD CONSTRAINT FK_IMPORTACIONES_TIPO
+                           FOREIGN KEY (TIPO) REFERENCES TIPOS_IMPORTACION (CLAVE)';
+END^
+
+SET TERM ; ^
+COMMIT;

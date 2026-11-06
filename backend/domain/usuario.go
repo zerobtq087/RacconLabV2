@@ -10,10 +10,30 @@ type Usuario struct {
 	Password     string     `gorm:"column:PASSWORD" json:"-"`
 	Tipo         string     `gorm:"column:TIPO" json:"tipo"`
 	Grupo        string     `gorm:"column:GRUPO" json:"grupo"`
+	Carrera      string     `gorm:"column:CARRERA" json:"carrera"` // es la carrera de su grupo
 	Activo       bool       `gorm:"column:ACTIVO" json:"activo"`
 	UltimoAcceso *time.Time `gorm:"column:ULTIMO_ACCESO" json:"ultimo_acceso"`
 	Roles        []string   `gorm:"-" json:"roles"`
 	Protegido    bool       `gorm:"-" json:"protegido"` // admin general: no se edita ni se borra
+}
+
+// UsuarioForm: lo que manda Usuarios.vue al agregar o editar (igual que models/Usuario.ts → UsuarioForm)
+type UsuarioForm struct {
+	Matricula string   `json:"matricula"`
+	Nombre    string   `json:"nombre"`
+	Password  string   `json:"password"` // al editar: vacía = no se cambia
+	Tipo      string   `json:"tipo"`     // alumnos | maestros | admins
+	Roles     []string `json:"roles"`    // vacío = los del tipo (TIPO_ROLES)
+	Grupo     string   `json:"grupo"`    // solo alumnos (se crea si no existe)
+	Carrera   string   `json:"carrera"`  // carrera del grupo (opcional)
+	Activo    bool     `json:"activo"`
+}
+
+// TipoUsuario: el catálogo TIPOS_USUARIO con los roles que da cada tipo (TIPO_ROLES)
+type TipoUsuario struct {
+	Clave       string   `gorm:"column:CLAVE" json:"clave"`
+	Descripcion string   `gorm:"column:DESCRIPCION" json:"descripcion"`
+	Roles       []string `gorm:"-" json:"roles"`
 }
 
 // UserAccount: lo que recibe el frontend en /api/current-user-acc

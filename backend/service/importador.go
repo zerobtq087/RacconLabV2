@@ -6,13 +6,11 @@ import (
 	"io"
 	"log"
 	"os"
-	"regexp"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
-	"unicode/utf8"
 
 	"raccoon-lab/backend/domain"
 	"raccoon-lab/backend/repository"
@@ -116,9 +114,15 @@ func (im *Importador) procesar(t *trabajo, ruta string) error {
 	}
 	defer l.Cerrar()
 
-	roles := im.repository.RolesDeTipo(t.imp.Tipo)
+	// Roles de cada tipo (catálogo TIPO_ROLES). En "general" cada fila trae su tipo.
+	roles := map[string][]string{}
+	for _, tipo := range []string{"alumnos", "maestros", "admins"} {
+		if t.imp.Tipo == "general" || t.imp.Tipo == tipo {
+			roles[tipo] = im.repository.RolesDeTipo(tipo)
+		}
+	}
 	if len(roles) == 0 {
-		return fmt.Errorf("tipo de usuario desconocido: %s", t.imp.Tipo)
+		return fmt.Errorf("tipo de importación desconocido: %s", t.imp.Tipo)
 	}
 
 	// Si la BD falla, se cancela todo para no seguir leyendo/cifrando en vano
@@ -168,7 +172,7 @@ func (im *Importador) procesar(t *trabajo, ruta string) error {
 	return <-errLectura
 }
 
-func (im *Importador) escribir(t *trabajo, roles []string, entrada <-chan *domain.FilaImport) error {
+func (im *Importador) escribir(t *trabajo, roles map[string][]string, entrada <-chan *domain.FilaImport) error {
 	grupos := make(map[string]string) // caché código -> ID, compartido entre lotes
 	lote := make([]*domain.FilaImport, 0, tamLote)
 
@@ -176,7 +180,7 @@ func (im *Importador) escribir(t *trabajo, roles []string, entrada <-chan *domai
 		if len(lote) == 0 {
 			return nil
 		}
-		res, err := im.repository.SaveBatch(t.imp.Tipo, roles, lote, grupos)
+		res, err := im.repository.SaveBatch(roles, lote, grupos)
 		if err != nil {
 			return err
 		}
@@ -224,18 +228,28 @@ const (
 	cPassword
 	cGrupo
 	cCarrera
+	cTipo
 )
 
-// sinonimos: cualquier encabezado que signifique lo mismo
+// sinonimos: cualquier encabezado que signifique lo mismo (ya normalizado:
+// sin acentos, minúsculas y solo letras, así "Contraseña" -> "contrasena")
 var sinonimos = map[string]int{
 	"matricula": cID, "clave": cID, "matriculaclave": cID, "usuario": cID, "id": cID,
 	"nombre": cNombre, "nombrecompleto": cNombre,
 	"contrasenia": cPassword, "contrasena": cPassword, "password": cPassword,
 	"grupo":   cGrupo,
 	"carrera": cCarrera,
+	"tipo":    cTipo, "tipousuario": cTipo, "rol": cTipo,
 }
 
-var reID = regexp.MustCompile(`^[a-z0-9._-]{1,20}$`)
+// Columnas de cada tipo de archivo, en el orden de la plantilla descargable.
+// Si el archivo no trae encabezados, se lee en este orden.
+var columnasImport = map[string][]string{
+	"alumnos":  {"matricula", "nombre", "contraseña", "grupo", "carrera"},
+	"maestros": {"matricula", "nombre", "contraseña"},
+	"admins":   {"matricula", "nombre", "contraseña"},
+	"general":  {"matricula", "nombre", "contraseña", "tipo", "grupo", "carrera"},
+}
 
 func (im *Importador) leer(ctx context.Context, t *trabajo, l Lector, salida chan<- *domain.FilaImport) error {
 	var (
@@ -243,7 +257,7 @@ func (im *Importador) leer(ctx context.Context, t *trabajo, l Lector, salida cha
 		num     int
 		vistos  = make(map[string]int) // matrícula -> fila (para detectar repetidas)
 	)
-	alumnos := t.imp.Tipo == "alumnos"
+	tipoArchivo := t.imp.Tipo
 
 	for {
 		reg, err := l.Siguiente()
@@ -266,18 +280,15 @@ func (im *Importador) leer(ctx context.Context, t *trabajo, l Lector, salida cha
 
 		// Primera fila con datos: ¿son encabezados?
 		if indices == nil {
-			if idx, ok := detectarEncabezados(reg, alumnos); ok {
+			if idx, ok := detectarEncabezados(reg, tipoArchivo); ok {
 				indices = idx
 				continue
 			}
-			// Sin encabezados: el orden de las columnas es el de la pantalla
-			indices = []int{0, 1, 2, -1, -1}
-			if alumnos {
-				indices = []int{0, 1, 2, 3, 4}
-			}
+			// Sin encabezados: las columnas van en el orden de la plantilla
+			indices = ordenPlantilla(tipoArchivo)
 		}
 
-		f, msg := validar(reg, indices, alumnos, num)
+		f, msg := validar(reg, indices, tipoArchivo, num)
 		if msg != "" {
 			t.errorFila(num, msg)
 			continue
@@ -321,8 +332,8 @@ func normalizar(s string) string {
 	}, s)
 }
 
-func detectarEncabezados(reg []string, alumnos bool) ([]int, bool) {
-	idx := []int{-1, -1, -1, -1, -1}
+func detectarEncabezados(reg []string, tipoArchivo string) ([]int, bool) {
+	idx := []int{-1, -1, -1, -1, -1, -1}
 	for i, c := range reg {
 		if campo, ok := sinonimos[normalizar(c)]; ok && idx[campo] == -1 {
 			idx[campo] = i
@@ -331,10 +342,22 @@ func detectarEncabezados(reg []string, alumnos bool) ([]int, bool) {
 	if idx[cID] == -1 || idx[cNombre] == -1 || idx[cPassword] == -1 {
 		return nil, false
 	}
-	if alumnos && idx[cGrupo] == -1 {
+	if tipoArchivo == "alumnos" && idx[cGrupo] == -1 {
+		return nil, false
+	}
+	if tipoArchivo == "general" && idx[cTipo] == -1 {
 		return nil, false
 	}
 	return idx, true
+}
+
+// ordenPlantilla: posición de cada campo cuando el archivo no trae encabezados
+func ordenPlantilla(tipoArchivo string) []int {
+	idx := []int{-1, -1, -1, -1, -1, -1}
+	for i, col := range columnasImport[tipoArchivo] {
+		idx[sinonimos[normalizar(col)]] = i
+	}
+	return idx
 }
 
 func celda(reg []string, i int) string {
@@ -344,39 +367,39 @@ func celda(reg []string, i int) string {
 	return strings.TrimSpace(reg[i])
 }
 
-func validar(reg []string, idx []int, alumnos bool, num int) (*domain.FilaImport, string) {
+func validar(reg []string, idx []int, tipoArchivo string, num int) (*domain.FilaImport, string) {
 	f := &domain.FilaImport{
 		Num:       num,
-		Matricula: strings.ToLower(celda(reg, idx[cID])),
-		Nombre:    strings.Join(strings.Fields(celda(reg, idx[cNombre])), " "),
+		Tipo:      tipoArchivo,
+		Matricula: celda(reg, idx[cID]),
+		Nombre:    celda(reg, idx[cNombre]),
 		Password:  celda(reg, idx[cPassword]),
+		Grupo:     celda(reg, idx[cGrupo]),
+		Carrera:   celda(reg, idx[cCarrera]),
+	}
+
+	// En el archivo general cada fila dice su tipo
+	if tipoArchivo == "general" {
+		texto := celda(reg, idx[cTipo])
+		tipo, ok := tipoDeTexto(texto)
+		switch {
+		case texto == "":
+			return nil, "falta el tipo (ALUMNO, PROFESOR o ADMIN)"
+		case !ok:
+			return nil, fmt.Sprintf("tipo inválido %q (usa ALUMNO, PROFESOR o ADMIN)", texto)
+		}
+		f.Tipo = tipo
+	}
+
+	// Las mismas reglas que el alta manual (service/usuarios.go)
+	if msg := validarDatos(&f.Matricula, &f.Nombre, &f.Grupo, &f.Carrera, f.Tipo == "alumnos"); msg != "" {
+		return nil, msg
 	}
 	switch {
-	case f.Matricula == "":
-		return nil, "falta la matrícula/clave"
-	case !reID.MatchString(f.Matricula):
-		return nil, fmt.Sprintf("matrícula/clave inválida %q (solo letras, números, . _ -; máx. 20)", f.Matricula)
-	case f.Nombre == "":
-		return nil, "falta el nombre"
-	case utf8.RuneCountInString(f.Nombre) > 120:
-		return nil, "el nombre pasa de 120 caracteres"
 	case f.Password == "":
 		return nil, "falta la contraseña"
 	case len(f.Password) > 72:
 		return nil, "la contraseña pasa de 72 caracteres"
-	}
-
-	if alumnos {
-		f.Grupo = strings.ToUpper(celda(reg, idx[cGrupo]))
-		f.Carrera = strings.Join(strings.Fields(celda(reg, idx[cCarrera])), " ")
-		switch {
-		case f.Grupo == "":
-			return nil, "falta el grupo"
-		case utf8.RuneCountInString(f.Grupo) > 15:
-			return nil, "el grupo pasa de 15 caracteres"
-		case utf8.RuneCountInString(f.Carrera) > 120:
-			return nil, "la carrera pasa de 120 caracteres"
-		}
 	}
 	return f, ""
 }

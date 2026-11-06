@@ -23,6 +23,7 @@ type ErrorFila struct {
 // FilaImport: un renglón del archivo ya validado, listo para guardar
 type FilaImport struct {
 	Num       int
+	Tipo      string // alumnos | maestros | admins (en "general" viene en cada fila)
 	Matricula string
 	Nombre    string
 	Password  string // en claro solo mientras se cifra

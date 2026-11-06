@@ -21,13 +21,14 @@ func NewImportarHandler(r *repository.ImportacionRepository, im *service.Importa
 	return &ImportarHandler{repository: r, importador: im}
 }
 
-var tiposValidos = map[string]bool{"alumnos": true, "maestros": true, "admins": true}
+// general: un solo archivo con todos; cada fila trae su tipo (ALUMNO, PROFESOR o ADMIN)
+var tiposValidos = map[string]bool{"alumnos": true, "maestros": true, "admins": true, "general": true}
 
 // Upload recibe el archivo, lo guarda y lo procesa en segundo plano
 func (h *ImportarHandler) Upload(c fiber.Ctx) error {
 	tipo := c.FormValue("tipo")
 	if !tiposValidos[tipo] {
-		return c.Status(fiber.StatusBadRequest).SendString("Tipo inválido (alumnos, maestros o admins)")
+		return c.Status(fiber.StatusBadRequest).SendString("Tipo inválido (alumnos, maestros, admins o general)")
 	}
 
 	archivo, err := c.FormFile("archivo")
@@ -56,6 +57,17 @@ func (h *ImportarHandler) Upload(c fiber.Ctx) error {
 	go h.importador.Process(id, tipo, archivo.Filename, ruta)
 
 	return c.JSON(fiber.Map{"id": id})
+}
+
+// Plantilla descarga el archivo de ejemplo: /api/importar/plantilla?tipo=alumnos&formato=xlsx
+func (h *ImportarHandler) Plantilla(c fiber.Ctx) error {
+	datos, nombre, tipoContenido, err := service.PlantillaImport(c.Query("tipo"), c.Query("formato"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+	}
+	c.Set(fiber.HeaderContentType, tipoContenido)
+	c.Set(fiber.HeaderContentDisposition, `attachment; filename="`+nombre+`"`)
+	return c.Send(datos)
 }
 
 // Status regresa el avance (lo pregunta el frontend cada segundo)

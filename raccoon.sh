@@ -583,16 +583,17 @@ levantar_servicios() {
 # ya existe, docs/migraciones/*.sql agregan lo nuevo (son idempotentes)
 aplicar_migraciones() {
     paso "Base de datos (migraciones)"
-    local m i r=0
+    # Por el servidor (localhost:), igual que la API: así no choca con sus conexiones
+    local m i r=0 base="localhost:/var/lib/firebird/data/raccoon.fdb"
     for ((i = 0; i < 60; i++)); do
         echo "SELECT 1 FROM RDB\$DATABASE;" | podman exec -i -e ISC_PASSWORD="$FIREBIRD_ROOT_PASSWORD" \
-            raccoon-firebird isql -q -user SYSDBA /var/lib/firebird/data/raccoon.fdb >/dev/null 2>&1 && break
+            raccoon-firebird isql -q -user SYSDBA "$base" >/dev/null 2>&1 && break
         sleep 2
     done
     for m in "$REPO_DIR"/docs/migraciones/*.sql; do
         [[ -f "$m" ]] || continue
         if podman exec -i -e ISC_PASSWORD="$FIREBIRD_ROOT_PASSWORD" raccoon-firebird \
-            isql -q -bail -user SYSDBA /var/lib/firebird/data/raccoon.fdb < "$m" >/dev/null; then
+            isql -q -bail -user SYSDBA "$base" < "$m" >/dev/null; then
             bien "$(basename "$m")"
         else
             aviso "Falló la migración $(basename "$m")"

@@ -31,21 +31,27 @@ func SetupRoutes(app *fiber.App, env *config.Env, db *gorm.DB, s *middleware.Ses
 	api.Post("/update-passwd", s.Validate, authHandler.UpdatePasswd)
 	api.Get("/current-user-acc", s.Validate, authHandler.CurrentUserAcc)
 
-	// Usuarios (solo admin)
+	// El servicio no toca Redis: el middleware le presta esta función para cerrar sesiones
+	cerrarSesiones := func(ctx context.Context, userID string) { _ = s.CloseAll(ctx, userID, "") }
+
+	// Usuarios (solo admin): tabla, agregar, editar y borrar
 	usuarios := api.Group("/usuarios", s.Validate, admin)
-	usuarioHandler := handler.NewUsuarioHandler(s, repository.NewUsuarioRepository(db), env.AdminUser)
+	usuarioRepo := repository.NewUsuarioRepository(db)
+	usuarioHandler := handler.NewUsuarioHandler(s, usuarioRepo,
+		service.NewUsuarios(usuarioRepo, cerrarSesiones, env.AdminUser), env.AdminUser)
 	usuarios.Get("/", usuarioHandler.GetPage)
+	usuarios.Get("/tipos", usuarioHandler.Tipos)
+	usuarios.Post("/", usuarioHandler.Create)
 	usuarios.Put("/:id", usuarioHandler.Update)
-	usuarios.Put("/:id/password", usuarioHandler.UpdatePasswd)
 	usuarios.Delete("/:id", usuarioHandler.Delete)
 	api.Get("/maestros", s.Validate, admin, usuarioHandler.Maestros)
 
 	// Importar usuarios desde CSV/Excel (solo admin)
 	importacionRepo := repository.NewImportacionRepository(db)
-	cerrarSesiones := func(ctx context.Context, userID string) { _ = s.CloseAll(ctx, userID, "") }
 	importador := service.NewImportador(importacionRepo, cerrarSesiones, env.AdminUser)
 	importarHandler := handler.NewImportarHandler(importacionRepo, importador)
 	api.Post("/importar", s.Validate, admin, importarHandler.Upload)
+	api.Get("/importar/plantilla", s.Validate, admin, importarHandler.Plantilla) // antes de /:id
 	api.Get("/importar/:id", s.Validate, admin, importarHandler.Status)
 
 	// Grupos (admin todo; maestro solo ve los suyos)

@@ -2,27 +2,26 @@ package handler
 
 import (
 	"errors"
-	"slices"
+	"log"
 	"strings"
 
 	"raccoon-lab/backend/domain"
 	"raccoon-lab/backend/middleware"
 	"raccoon-lab/backend/repository"
+	"raccoon-lab/backend/service"
 
 	"github.com/gofiber/fiber/v3"
-	"golang.org/x/crypto/bcrypt"
 )
-
-var rolesValidos = []string{"ADMIN", "PROFESOR", "ALUMNO"}
 
 type UsuarioHandler struct {
 	session    *middleware.Session
 	repository *repository.UsuarioRepository
+	usuarios   *service.Usuarios
 	adminUser  string // matrícula del admin general (protegido)
 }
 
-func NewUsuarioHandler(s *middleware.Session, r *repository.UsuarioRepository, adminUser string) *UsuarioHandler {
-	return &UsuarioHandler{session: s, repository: r, adminUser: strings.ToLower(adminUser)}
+func NewUsuarioHandler(s *middleware.Session, r *repository.UsuarioRepository, u *service.Usuarios, adminUser string) *UsuarioHandler {
+	return &UsuarioHandler{session: s, repository: r, usuarios: u, adminUser: strings.ToLower(adminUser)}
 }
 
 func (h *UsuarioHandler) GetPage(c fiber.Ctx) error {
@@ -44,6 +43,11 @@ func (h *UsuarioHandler) GetPage(c fiber.Ctx) error {
 	return c.JSON(pagina)
 }
 
+// Tipos: tipos de usuario con los roles que da cada uno (para el formulario)
+func (h *UsuarioHandler) Tipos(c fiber.Ctx) error {
+	return c.JSON(h.repository.Tipos())
+}
+
 // usuarioEditable regresa el usuario si existe y no es el admin general
 func (h *UsuarioHandler) usuarioEditable(c fiber.Ctx) (*domain.Usuario, error) {
 	u := h.repository.GetByID(c.Params("id"))
@@ -56,65 +60,46 @@ func (h *UsuarioHandler) usuarioEditable(c fiber.Ctx) (*domain.Usuario, error) {
 	return u, nil
 }
 
+// errorUsuario traduce los errores del servicio a su status
+func errorUsuario(c fiber.Ctx, err error) error {
+	var ev *service.ErrValidacion
+	switch {
+	case errors.As(err, &ev):
+		return c.Status(fiber.StatusBadRequest).SendString(ev.Texto)
+	case errors.Is(err, repository.ErrMatriculaOcupada):
+		return c.Status(fiber.StatusConflict).SendString(err.Error())
+	}
+	log.Printf("[USUARIOS] %v", err)
+	return c.Status(fiber.StatusInternalServerError).SendString("No se pudo guardar")
+}
+
+func (h *UsuarioHandler) Create(c fiber.Ctx) error {
+	var f domain.UsuarioForm
+	if err := c.Bind().Body(&f); err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString("Datos inválidos")
+	}
+	if err := h.usuarios.Create(&f); err != nil {
+		return errorUsuario(c, err)
+	}
+	return c.SendString("success")
+}
+
 func (h *UsuarioHandler) Update(c fiber.Ctx) error {
 	actual, err := h.usuarioEditable(c)
 	if actual == nil {
 		return err
 	}
 
-	var u domain.Usuario
-	if err := c.Bind().Body(&u); err != nil {
+	var f domain.UsuarioForm
+	if err := c.Bind().Body(&f); err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString("Datos inválidos")
 	}
-	u.ID = actual.ID
-
-	if strings.TrimSpace(u.Matricula) == "" || strings.TrimSpace(u.Nombre) == "" {
-		return c.Status(fiber.StatusBadRequest).SendString("Matrícula y nombre son obligatorios")
+	if userID, _ := c.Locals("userID").(string); userID == actual.ID && !f.Activo {
+		return c.Status(fiber.StatusBadRequest).SendString("No puedes desactivar tu propia cuenta")
 	}
-	if len(u.Roles) == 0 {
-		return c.Status(fiber.StatusBadRequest).SendString("El usuario debe tener al menos un rol")
+	if err := h.usuarios.Update(actual, &f); err != nil {
+		return errorUsuario(c, err)
 	}
-	for _, rol := range u.Roles {
-		if !slices.Contains(rolesValidos, rol) {
-			return c.Status(fiber.StatusBadRequest).SendString("Rol inválido: " + rol)
-		}
-	}
-	if actual.Tipo != "alumnos" {
-		u.Grupo = "" // solo los alumnos tienen grupo
-	}
-
-	if err := h.repository.Update(&u); err != nil {
-		if errors.Is(err, repository.ErrMatriculaOcupada) {
-			return c.Status(fiber.StatusConflict).SendString(err.Error())
-		}
-		return c.Status(fiber.StatusInternalServerError).SendString("No se pudo guardar")
-	}
-
-	// Sus permisos cambiaron: que vuelva a iniciar sesión
-	_ = h.session.CloseAll(c.Context(), u.ID, "")
-	return c.SendString("success")
-}
-
-func (h *UsuarioHandler) UpdatePasswd(c fiber.Ctx) error {
-	u, err := h.usuarioEditable(c)
-	if u == nil {
-		return err
-	}
-
-	var req map[string]string
-	if err := c.Bind().Body(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).SendString("Datos inválidos")
-	}
-	if len(req["password"]) < 8 {
-		return c.Status(fiber.StatusBadRequest).SendString("La contraseña debe tener al menos 8 caracteres")
-	}
-
-	hashPasswd, _ := bcrypt.GenerateFromPassword([]byte(req["password"]), bcrypt.DefaultCost)
-	if err := h.repository.UpdatePasswd(u.ID, string(hashPasswd)); err != nil {
-		return c.Status(fiber.StatusInternalServerError).SendString("No se pudo cambiar la contraseña")
-	}
-
-	_ = h.session.CloseAll(c.Context(), u.ID, "")
 	return c.SendString("success")
 }
 

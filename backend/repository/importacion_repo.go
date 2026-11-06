@@ -123,8 +123,10 @@ type ResultadoLote struct {
 
 // SaveBatch guarda un lote de filas en UNA transacción.
 // Un error en una fila no tumba el lote: se anota y se sigue.
+// Cada fila trae su tipo (en el archivo "general" pueden venir mezclados);
+// roles dice qué roles recibe cada tipo.
 // grupos es un caché código -> ID que se comparte entre lotes (por apuntador).
-func (r *ImportacionRepository) SaveBatch(tipo string, roles []string, lote []*domain.FilaImport,
+func (r *ImportacionRepository) SaveBatch(roles map[string][]string, lote []*domain.FilaImport,
 	grupos map[string]string) (*ResultadoLote, error) {
 
 	res := &ResultadoLote{}
@@ -150,7 +152,7 @@ func (r *ImportacionRepository) SaveBatch(tipo string, roles []string, lote []*d
 				if err := tx.Exec(`
 					INSERT INTO USUARIOS (ID, MATRICULA, NOMBRE, "PASSWORD", TIPO, ID_GRUPO)
 					VALUES (CHAR_TO_UUID(?), ?, ?, ?, ?, CHAR_TO_UUID(?))`,
-					idUsuario, f.Matricula, f.Nombre, f.Hash, tipo, idGrupo).Error; err != nil {
+					idUsuario, f.Matricula, f.Nombre, f.Hash, f.Tipo, idGrupo).Error; err != nil {
 					res.Errores = append(res.Errores, domain.ErrorFila{Fila: f.Num, Mensaje: "error al insertar"})
 					continue
 				}
@@ -159,7 +161,7 @@ func (r *ImportacionRepository) SaveBatch(tipo string, roles []string, lote []*d
 				if err := tx.Exec(`
 					UPDATE USUARIOS SET NOMBRE = ?, "PASSWORD" = ?, TIPO = ?, ID_GRUPO = CHAR_TO_UUID(?)
 					WHERE ID = CHAR_TO_UUID(?)`,
-					f.Nombre, f.Hash, tipo, idGrupo, idUsuario).Error; err != nil {
+					f.Nombre, f.Hash, f.Tipo, idGrupo, idUsuario).Error; err != nil {
 					res.Errores = append(res.Errores, domain.ErrorFila{Fila: f.Num, Mensaje: "error al actualizar"})
 					continue
 				}
@@ -167,7 +169,7 @@ func (r *ImportacionRepository) SaveBatch(tipo string, roles []string, lote []*d
 			}
 
 			// Roles: se AGREGAN; no se quitan los que el admin ya haya asignado
-			for _, rol := range roles {
+			for _, rol := range roles[f.Tipo] {
 				tx.Exec(`
 					UPDATE OR INSERT INTO USUARIO_ROLES (ID_USUARIO, ROL)
 					VALUES (CHAR_TO_UUID(?), ?) MATCHING (ID_USUARIO, ROL)`, idUsuario, rol)

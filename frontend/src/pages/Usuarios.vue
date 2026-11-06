@@ -1,8 +1,117 @@
 <template>
   <AppFrame>
+    <!-- Avisos de la página (sin ventanas emergentes) -->
+    <v-alert
+      v-if="aviso.texto"
+      class="mt-5"
+      closable
+      :text="aviso.texto"
+      :type="aviso.tipo"
+      variant="tonal"
+      @click:close="aviso.texto = ''"
+    />
+
+    <!-- Confirmar borrado -->
+    <v-alert v-if="porBorrar" class="mt-5" type="warning" variant="tonal">
+      ¿Borrar a <strong>{{ porBorrar.matricula }} - {{ porBorrar.nombre }}</strong>? Esto no se puede deshacer.
+      <template #append>
+        <v-btn class="me-2" text="Cancelar" variant="text" @click="porBorrar = null" />
+        <v-btn color="error" :loading="borrando" text="Sí, borrar" variant="flat" @click="remove" />
+      </template>
+    </v-alert>
+
+    <!-- Formulario para agregar o editar (dentro de la página) -->
+    <v-card v-if="editando" border class="my-5" elevation="0" rounded="lg" :title="editandoId ? `Editar ${original}` : 'Agregar usuario'">
+      <template #text>
+        <v-alert v-if="errorForm" class="mb-4" density="compact" :text="errorForm" type="error" variant="tonal" />
+
+        <v-row dense>
+          <v-col cols="12" md="4">
+            <v-text-field v-model="form.matricula" hint="Es su usuario para entrar" label="Matrícula" variant="outlined" />
+          </v-col>
+          <v-col cols="12" md="8">
+            <v-text-field v-model="form.nombre" label="Nombre completo" variant="outlined" />
+          </v-col>
+
+          <v-col cols="12" md="4">
+            <v-select
+              v-model="form.tipo"
+              item-title="descripcion"
+              item-value="clave"
+              :items="tipos"
+              label="Tipo"
+              variant="outlined"
+              @update:model-value="cambiarTipo"
+            />
+          </v-col>
+          <template v-if="form.tipo == 'alumnos'">
+            <v-col cols="12" md="3">
+              <v-combobox
+                v-model="form.grupo"
+                hint="Si no existe, se crea"
+                :items="grupos.map(g => g.codigo)"
+                label="Grupo"
+                variant="outlined"
+                @update:model-value="sugerirCarrera"
+              />
+            </v-col>
+            <v-col cols="12" md="5">
+              <v-combobox
+                v-model="form.carrera"
+                hint="Es la carrera del grupo"
+                :items="carreras"
+                label="Carrera (opcional)"
+                variant="outlined"
+              />
+            </v-col>
+          </template>
+
+          <v-col cols="12" md="6">
+            <v-text-field
+              v-model="form.password"
+              :append-inner-icon="verPassword ? 'mdi-eye-off' : 'mdi-eye'"
+              autocomplete="new-password"
+              :hint="editandoId ? 'Déjala vacía para no cambiarla (mínimo 8 caracteres)' : 'Mínimo 8 caracteres'"
+              :label="editandoId ? 'Restablecer contraseña' : 'Contraseña'"
+              persistent-hint
+              :type="verPassword ? 'text' : 'password'"
+              variant="outlined"
+              @click:append-inner="verPassword = !verPassword"
+            />
+          </v-col>
+          <v-col cols="12" md="6">
+            <div class="text-subtitle-2">Roles</div>
+            <div class="d-flex flex-wrap ga-4">
+              <v-checkbox
+                v-for="rol in roles"
+                :key="rol.value"
+                v-model="form.roles"
+                density="compact"
+                hide-details
+                :label="rol.text"
+                :value="rol.value"
+              />
+            </div>
+            <v-switch v-model="form.activo" color="primary" density="compact" hide-details inset label="Cuenta activa" />
+          </v-col>
+        </v-row>
+
+        <div class="text-caption text-medium-emphasis mt-2">
+          Si cambias la contraseña, el tipo, los roles o la matrícula, o desactivas la cuenta, se cierran sus sesiones.
+        </div>
+      </template>
+
+      <template #actions>
+        <v-spacer />
+        <v-btn text="Cancelar" @click="cerrarForm" />
+        <v-btn color="primary" :loading="guardando" :text="editandoId ? 'Guardar cambios' : 'Agregar'" variant="flat" @click="save" />
+      </template>
+    </v-card>
+
     <v-card border class="my-5" elevation="0" rounded="lg" title="Usuarios">
       <template #append>
-        <v-btn color="primary" prepend-icon="mdi-file-upload-outline" text="Importar" to="/importar" />
+        <v-btn class="me-2" color="primary" prepend-icon="mdi-account-plus" text="Agregar usuario" variant="flat" @click="openCreate" />
+        <v-btn color="primary" prepend-icon="mdi-file-upload-outline" text="Importar" to="/importar" variant="tonal" />
       </template>
 
       <template #text>
@@ -24,8 +133,8 @@
               v-model="filtros.tipo"
               clearable
               hide-details
-              item-title="text"
-              item-value="value"
+              item-title="descripcion"
+              item-value="clave"
               :items="tipos"
               label="Tipo"
               variant="outlined"
@@ -36,7 +145,7 @@
               v-model="filtros.grupo"
               clearable
               hide-details
-              :items="grupos"
+              :items="grupos.map(g => g.codigo)"
               label="Grupo"
               variant="outlined"
             />
@@ -78,71 +187,12 @@
           <template #item.actions="{ item }">
             <div v-if="!item.protegido" class="d-flex justify-end ga-1">
               <v-icon icon="mdi-pencil" size="small" @click="openEdit(item)" />
-              <v-icon icon="mdi-lock-reset" size="small" @click="openPassword(item)" />
-              <v-icon color="error" icon="mdi-delete" size="small" @click="remove(item)" />
+              <v-icon color="error" icon="mdi-delete" size="small" @click="porBorrar = item" />
             </div>
           </template>
         </v-data-table-server>
       </template>
     </v-card>
-
-    <!-- Dialogo Editar -->
-    <v-dialog v-model="dialog" max-width="500">
-      <v-card rounded="lg" :title="`Editar ${form.matricula}`">
-        <template #text>
-          <v-text-field v-model="form.matricula" class="mb-2" label="Matrícula" variant="outlined" />
-          <v-text-field v-model="form.nombre" class="mb-2" label="Nombre" variant="outlined" />
-          <v-select
-            v-if="form.tipo == 'alumnos'"
-            v-model="form.grupo"
-            class="mb-2"
-            clearable
-            :items="grupos"
-            label="Grupo"
-            variant="outlined"
-          />
-          <div class="text-subtitle-2 mb-1">Roles</div>
-          <v-checkbox
-            v-for="rol in roles"
-            :key="rol.value"
-            v-model="form.roles"
-            density="compact"
-            hide-details
-            :label="rol.text"
-            :value="rol.value"
-          />
-          <v-switch v-model="form.activo" class="mt-2" color="primary" hide-details inset label="Cuenta activa" />
-        </template>
-        <template #actions>
-          <v-spacer />
-          <v-btn text="Cancelar" @click="dialog = false" />
-          <v-btn color="primary" text="Guardar" @click="save" />
-        </template>
-      </v-card>
-    </v-dialog>
-
-    <!-- Dialogo Contraseña -->
-    <v-dialog v-model="dialogPassword" max-width="420">
-      <v-card rounded="lg" :title="`Nueva contraseña para ${form.matricula}`">
-        <template #text>
-          <v-text-field
-            v-model="nuevaPassword"
-            :append-inner-icon="verPassword ? 'mdi-eye-off' : 'mdi-eye'"
-            hint="Mínimo 8 caracteres"
-            label="Contraseña"
-            persistent-hint
-            :type="verPassword ? 'text' : 'password'"
-            variant="outlined"
-            @click:append-inner="verPassword = !verPassword"
-          />
-        </template>
-        <template #actions>
-          <v-spacer />
-          <v-btn text="Cancelar" @click="dialogPassword = false" />
-          <v-btn color="primary" :disabled="nuevaPassword.length < 8" text="Cambiar" @click="savePassword" />
-        </template>
-      </v-card>
-    </v-dialog>
   </AppFrame>
 </template>
 
@@ -151,8 +201,8 @@ import AppFrame from '../components/AppFrame.vue'
 import { onMounted, reactive, ref, watch } from 'vue'
 import type { DataTableHeader } from 'vuetify'
 import axios from 'axios'
-import Swal from 'sweetalert2'
-import { Usuario } from '@/models/Usuario'
+import { type TipoUsuario, Usuario, UsuarioForm } from '@/models/Usuario'
+import { Grupo } from '@/models/Grupo'
 
 const headers: DataTableHeader[] = [
   { title: 'Matrícula', key: 'matricula', align: 'start', sortable: false },
@@ -161,12 +211,6 @@ const headers: DataTableHeader[] = [
   { title: 'Roles', key: 'roles', align: 'start', sortable: false },
   { title: 'Activo', key: 'activo', align: 'center', sortable: false },
   { title: 'Acciones', key: 'actions', align: 'end', sortable: false },
-]
-
-const tipos = [
-  { text: 'Alumnos', value: 'alumnos' },
-  { text: 'Maestros', value: 'maestros' },
-  { text: 'Administradores', value: 'admins' },
 ]
 
 const roles = [
@@ -178,18 +222,38 @@ const roles = [
 const colores: Record<string, string> = { ADMIN: 'red', PROFESOR: 'orange', ALUMNO: 'blue' }
 
 const usuarios = ref<Usuario[]>([])
-const grupos = ref<string[]>([])
+const tipos = ref<TipoUsuario[]>([])
+const grupos = ref<Grupo[]>([])
+const carreras = ref<string[]>([])
 const total = ref(0)
 const cargando = ref(false)
 const pagina = ref(1)
 const porPagina = ref(10)
 const filtros = reactive({ buscar: '', tipo: null as string | null, grupo: null as string | null })
 
-const dialog = ref(false)
-const dialogPassword = ref(false)
-const form = ref<Usuario>(new Usuario())
-const nuevaPassword = ref('')
+// Formulario
+const editando = ref(false)
+const editandoId = ref('')         // '' = agregar
+const original = ref('')           // matrícula antes de editar (para el título)
+const form = ref<UsuarioForm>(new UsuarioForm())
 const verPassword = ref(false)
+const guardando = ref(false)
+const errorForm = ref('')
+
+// Avisos y borrado
+const aviso = reactive({ tipo: 'success' as 'success' | 'error', texto: '' })
+const porBorrar = ref<Usuario | null>(null)
+const borrando = ref(false)
+let timerAviso: ReturnType<typeof setTimeout> | undefined
+
+function avisar (tipo: 'success' | 'error', texto: string) {
+  aviso.tipo = tipo
+  aviso.texto = texto
+  clearTimeout(timerAviso)
+  if (tipo == 'success') {
+    timerAviso = setTimeout(() => aviso.texto = '', 4000)
+  }
+}
 
 // La tabla pide al backend solo la página que se ve (sirve para miles de alumnos)
 function cargar (opciones?: { page: number, itemsPerPage: number }) {
@@ -214,9 +278,11 @@ function cargar (opciones?: { page: number, itemsPerPage: number }) {
     .finally(() => cargando.value = false)
 }
 
-function cargarGrupos () {
-  axios.get('/api/grupos').then(response => {
-    grupos.value = response.data.map((g: { codigo: string }) => g.codigo)
+function cargarCatalogos () {
+  axios.get('/api/usuarios/tipos').then(response => tipos.value = response.data)
+  axios.get('/api/grupos').then(response => grupos.value = response.data)
+  axios.get('/api/carreras').then(response => {
+    carreras.value = response.data.map((c: { nombre: string }) => c.nombre)
   })
 }
 
@@ -230,64 +296,88 @@ watch(filtros, () => {
   }, 400)
 })
 
-function openEdit (item: Usuario) {
-  form.value = { ...item, roles: [...item.roles] }
-  dialog.value = true
+// Al elegir el tipo se ponen los roles que da ese tipo (se pueden ajustar)
+function cambiarTipo (clave: string) {
+  form.value.roles = [...(tipos.value.find(t => t.clave == clave)?.roles || [])]
 }
 
-function openPassword (item: Usuario) {
-  form.value = { ...item }
-  nuevaPassword.value = ''
+// Si el grupo ya existe, se propone su carrera
+function sugerirCarrera (codigo: string) {
+  const grupo = grupos.value.find(g => g.codigo.toUpperCase() == (codigo || '').toUpperCase())
+  if (grupo?.carrera) {
+    form.value.carrera = grupo.carrera
+  }
+}
+
+function openCreate () {
+  form.value = new UsuarioForm()
+  cambiarTipo(form.value.tipo)
+  editandoId.value = ''
+  abrirForm()
+}
+
+function openEdit (item: Usuario) {
+  form.value = new UsuarioForm(item.matricula, item.nombre, '', item.tipo, [...item.roles], item.grupo, item.carrera, item.activo)
+  editandoId.value = item.id
+  original.value = item.matricula
+  abrirForm()
+}
+
+function abrirForm () {
+  errorForm.value = ''
   verPassword.value = false
-  dialogPassword.value = true
+  porBorrar.value = null
+  editando.value = true
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function cerrarForm () {
+  editando.value = false
+  errorForm.value = ''
 }
 
 function save () {
+  errorForm.value = ''
   if (form.value.roles.length == 0) {
-    Swal.fire({ icon: 'warning', title: 'El usuario debe tener al menos un rol' })
+    errorForm.value = 'El usuario debe tener al menos un rol'
     return
   }
-  axios.put(`/api/usuarios/${form.value.id}`, form.value)
+
+  guardando.value = true
+  const peticion = editandoId.value
+    ? axios.put(`/api/usuarios/${editandoId.value}`, form.value)
+    : axios.post('/api/usuarios', form.value)
+
+  peticion
     .then(() => {
-      dialog.value = false
+      avisar('success', editandoId.value ? `Se guardaron los cambios de ${form.value.matricula}.` : `Se agregó a ${form.value.matricula}.`)
+      cerrarForm()
       cargar()
-      Swal.fire({ icon: 'success', title: 'Actualizado', timer: 1500, showConfirmButton: false })
+      cargarCatalogos() // pudo crearse un grupo o una carrera
     })
     .catch(err => {
-      Swal.fire({ icon: 'error', title: 'Error', text: err.response?.data || 'No se pudo guardar.' })
+      errorForm.value = err.response?.data || 'No se pudo guardar.'
     })
+    .finally(() => guardando.value = false)
 }
 
-function savePassword () {
-  axios.put(`/api/usuarios/${form.value.id}/password`, { password: nuevaPassword.value })
+function remove () {
+  if (!porBorrar.value) return
+  const item = porBorrar.value
+  borrando.value = true
+  axios.delete(`/api/usuarios/${item.id}`)
     .then(() => {
-      dialogPassword.value = false
-      Swal.fire({ icon: 'success', title: 'Contraseña cambiada', timer: 1500, showConfirmButton: false })
+      avisar('success', `Se borró a ${item.matricula}.`)
+      cargar()
     })
     .catch(err => {
-      Swal.fire({ icon: 'error', title: 'Error', text: err.response?.data || 'No se pudo cambiar.' })
+      avisar('error', err.response?.data || 'No se pudo borrar.')
+    })
+    .finally(() => {
+      borrando.value = false
+      porBorrar.value = null
     })
 }
 
-function remove (item: Usuario) {
-  Swal.fire({
-    icon: 'warning',
-    title: '¿Borrar usuario?',
-    text: `Se eliminará "${item.matricula} - ${item.nombre}".`,
-    showCancelButton: true,
-    confirmButtonText: 'Sí, borrar',
-    cancelButtonText: 'Cancelar',
-    confirmButtonColor: '#d33',
-  }).then(result => {
-    if (!result.isConfirmed) return
-    axios.delete(`/api/usuarios/${item.id}`).then(() => {
-      cargar()
-      Swal.fire({ icon: 'success', title: 'Borrado', timer: 1500, showConfirmButton: false })
-    }).catch(err => {
-      Swal.fire({ icon: 'error', title: 'Error', text: err.response?.data || 'No se pudo borrar.' })
-    })
-  })
-}
-
-onMounted(cargarGrupos)
+onMounted(cargarCatalogos)
 </script>
