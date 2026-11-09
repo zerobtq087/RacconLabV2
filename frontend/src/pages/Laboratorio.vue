@@ -56,12 +56,12 @@
 
           <p class="mb-2 text-medium-emphasis">
             Abre <strong>GNS3 2.2.59</strong> en tu computadora, ve a <strong>Edit → Preferences → Server</strong>,
-            desactiva <em>Enable local server</em>, escribe el servidor y el puerto, y deja
-            <strong>sin marcar</strong> <em>Auth</em> (ya no lleva usuario ni contraseña).
+            desactiva <em>Enable local server</em>, escribe el servidor y el puerto, <strong>marca</strong>
+            <em>Auth</em> y escribe el usuario y la contraseña de abajo.
           </p>
           <p class="mb-4 text-medium-emphasis">
-            El servidor solo deja entrar a esta computadora mientras tengas la sesión iniciada en esta página:
-            si cierras sesión, GNS3 y las consolas dejan de responder hasta que vuelvas a entrar.
+            Además, el servidor solo deja entrar a esta computadora mientras tengas la sesión iniciada en esta
+            página: si cierras sesión, GNS3 y las consolas dejan de responder hasta que vuelvas a entrar.
           </p>
 
           <v-row>
@@ -209,6 +209,8 @@ const campos = computed(() => {
   const lista = [
     { label: 'Servidor (Host)', valor: window.location.hostname, md: 6, hint: '' },
     { label: 'Puerto', valor: lab.value.puerto, md: 6, hint: 'Las consolas de tus equipos se abren solas al agregarlos' },
+    { label: 'Usuario', valor: lab.value.usuario, md: 6, hint: '' },
+    { label: 'Contraseña', valor: lab.value.token, md: 6, hint: '' },
   ]
   if (lab.value.codigo) {
     lista.push({ label: 'Código del equipo', valor: lab.value.codigo, md: 12, hint: 'Compártelo con tu equipo para que se unan' })

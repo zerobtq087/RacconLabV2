@@ -54,19 +54,20 @@ fi
 PORT=${GNS3_PORT:-3080}
 CONSOLE_START=${GNS3_CONSOLE_START:-5000}
 CONSOLE_END=${GNS3_CONSOLE_END:-5039}
+GNS3_USER=${GNS3_USER:-raccoon}
+GNS3_PASSWORD=${GNS3_PASSWORD:?Falta GNS3_PASSWORD}
 
 mkdir -p /root/.config/GNS3/2.2
 
 # host = 0.0.0.0: el GNS3 server y las consolas escuchan en todas las interfaces;
-# Docker publica el mismo bloque de puertos hacia el servidor.
-# auth = False: GNS3 no pide usuario ni contraseña. Quién entra lo decide el
-# firewall del servidor (raccoon-accesos): el puerto del lab y las consolas de
-# sus nodos solo se abren a las IPs con sesión en la página con acceso al lab.
+# Docker publica el mismo bloque de puertos hacia el servidor
 cat <<CONF > /root/.config/GNS3/2.2/gns3_server.conf
 [Server]
 host = 0.0.0.0
 port = ${PORT}
-auth = False
+auth = True
+user = ${GNS3_USER}
+password = ${GNS3_PASSWORD}
 console_start_port_range = ${CONSOLE_START}
 console_end_port_range = ${CONSOLE_END}
 ubridge_path = /usr/bin/ubridge

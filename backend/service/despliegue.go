@@ -159,12 +159,13 @@ func (s *Despliegues) Estado(idUsuario string) *domain.Despliegue {
 	return &domain.Despliegue{Estado: "NINGUNO"}
 }
 
-// proyectoExiste pregunta al GNS3 del laboratorio si ya tiene un proyecto con ese nombre
+// proyectoExiste pregunta al GNS3 del laboratorio (con el usuario y token del dueño)
 func (s *Despliegues) proyectoExiste(lab *domain.Laboratorio, nombre string) bool {
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s:%d/v2/projects", s.env.GNS3Host, lab.PuertoBase), nil)
 	if err != nil {
 		return false
 	}
+	req.SetBasicAuth(lab.Usuario, lab.Token)
 	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 	if err != nil {
 		return false // si no responde, el playbook dará el error
@@ -221,6 +222,8 @@ func (s *Despliegues) ejecutar(id string, lab *domain.Laboratorio, topo *domain.
 	salida, codigo, err := s.docker.ExecStream(ctx, lab.Contenedor, []string{
 		"ansible-playbook", playbookTopologia,
 		"-e", fmt.Sprintf("gns3_url=http://127.0.0.1:%d", lab.PuertoBase),
+		"-e", "gns3_user=" + lab.Usuario,
+		"-e", "gns3_password=" + lab.Token,
 		"-e", "project_name=" + topo.ProjectName,
 		"-e", "topology_file=" + carpetaTemporal + "/" + archivo,
 	}, func(linea string) {

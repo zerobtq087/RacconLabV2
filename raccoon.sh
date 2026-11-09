@@ -390,8 +390,7 @@ instalar_reparar_red() {
 # Prioridad "raw" (-300): se revisa antes del DNAT de Docker y Podman (-100).
 # Los puertos de los labs están cerrados por defecto: solo se abren los del set
 # "acceso" (IP . puerto: el GNS3 del lab y las consolas de sus nodos), que llena
-# raccoon-accesos con lo que dice la API. GNS3 ya no pide contraseña: este filtro
-# es lo que decide quién entra. Desde las redes de Docker de los labs (rl-labs0,
+# raccoon-accesos con lo que dice la API (además GNS3 pide usuario y contraseña). Desde las redes de Docker de los labs (rl-labs0,
 # y docker0 de los labs viejos) nunca se abren: un nodo de un lab no llega al GNS3
 # de otro (entre ellos ya no se ven: la red raccoon-labs tiene ICC apagado).
 table inet raccoon
@@ -902,7 +901,7 @@ autoprueba() {
 # ---------------------------------------------------------------------
 probar_consola_ubuntu() {
     paso "Autoprueba de la consola del host Ubuntu"
-    local nombre="rl-autoprueba" base i r=0 resultado
+    local nombre="rl-autoprueba" usuario="autoprueba" token base i r=0 resultado
     base=$((LAB_FIN - LAB_PUERTOS + 1))
 
     if [[ ! -f "$GNS3_VOLUMES/gns3_images/Docker/$IMAGEN_UBUNTU" ]]; then
@@ -914,11 +913,13 @@ probar_consola_ubuntu() {
         return 0
     fi
 
+    token=$(secreto 8)
     docker rm -f "$nombre" >/dev/null 2>&1 || true
     docker volume rm -f "$nombre-docker" >/dev/null 2>&1 || true
     docker run -d --name "$nombre" --privileged \
         -p "127.0.0.1:$base-$((base + 3)):$base-$((base + 3))" \
         -e GNS3_PORT="$base" -e GNS3_CONSOLE_START=$((base + 1)) -e GNS3_CONSOLE_END=$((base + 3)) \
+        -e GNS3_USER="$usuario" -e GNS3_PASSWORD="$token" \
         -v "$GNS3_VOLUMES/gns3_images/Docker:/root/GNS3/images/Docker:ro" \
         -v "$GNS3_VOLUMES/ansible:/root/ansible:ro" \
         --mount "type=volume,src=$nombre-docker,dst=/var/lib/docker" \
@@ -926,24 +927,25 @@ probar_consola_ubuntu() {
 
     info "Esperando al GNS3 de prueba (carga la imagen Ubuntu)..."
     for ((i = 0; i < 150; i++)); do
-        [[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$base/v2/version" || true)" == "200" ]] && break
+        [[ "$(curl -s -o /dev/null -w '%{http_code}' -u "$usuario:$token" "http://127.0.0.1:$base/v2/version" || true)" == "200" ]] && break
         sleep 2
     done
 
     # Plantillas igual que la API de Go al crear un lab
     docker exec "$nombre" ansible-playbook -i 127.0.0.1, -c local /root/ansible/global/deploy_templates.yml \
-        -e "gns3_url=http://127.0.0.1:$base" \
+        -e "gns3_url=http://127.0.0.1:$base" -e "gns3_user=$usuario" -e "gns3_password=$token" \
         -e target_host=127.0.0.1 >/dev/null 2>&1 || r=1
 
-    resultado=$(python3 -I - "$base" 2>&1 <<'EOF'
-import json, socket, sys, time, urllib.request
+    resultado=$(python3 -I - "$base" "$usuario" "$token" 2>&1 <<'EOF'
+import base64, json, socket, sys, time, urllib.request
 
-base = int(sys.argv[1])
-URL = f"http://127.0.0.1:{base}/v2"   # GNS3 sin contraseña (como los labs)
+base, usuario, token = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+URL = f"http://127.0.0.1:{base}/v2"
+AUTH = "Basic " + base64.b64encode(f"{usuario}:{token}".encode()).decode()
 
 def api(metodo, ruta, datos=None):
     cuerpo = None if datos is None else json.dumps(datos).encode()
-    req = urllib.request.Request(URL + ruta, data=cuerpo, method=metodo)
+    req = urllib.request.Request(URL + ruta, data=cuerpo, method=metodo, headers={"Authorization": AUTH})
     with urllib.request.urlopen(req, timeout=60) as r:
         txt = r.read()
         return json.loads(txt) if txt else None
@@ -1040,7 +1042,7 @@ resumen() {
   Bitácora        : $LOG
   Ver servicios   : podman ps   |   Labs: docker ps
   Si la página deja de cargar (p. ej. tras "firewall-cmd --reload"): raccoon-red
-  Puertos de los labs: cerrados; abren el GNS3 y las consolas de los nodos a la IP con sesión (raccoon-accesos ver)
+  Puertos de los labs: cerrados; abren el GNS3 (con usuario y contraseña) y las consolas de los nodos a la IP con sesión (raccoon-accesos ver)
 =====================================================================
 EOF
 

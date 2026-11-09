@@ -3,7 +3,7 @@
 #  Despliega una topología en el GNS3 del laboratorio.
 #
 #  La API de Go le pasa (con -e):
-#    gns3_url                            → GNS3 del lab (sin contraseña)
+#    gns3_url, gns3_user, gns3_password  → GNS3 del lab (matrícula + token)
 #    project_name                        → nombre del proyecto
 #    topology_file                       → JSON ya RESUELTO por Go: cada router trae
 #                                          sus interfaces con IP y sus redes, y cada
@@ -15,7 +15,16 @@
   hosts: localhost
   gather_facts: false
 
-  # El GNS3 del laboratorio no pide contraseña (el firewall decide quién entra)
+  # El GNS3 server del laboratorio pide usuario y contraseña (token)
+  module_defaults:
+    ansible.builtin.uri:
+      url_username: "{{ gns3_user }}"
+      url_password: "{{ gns3_password }}"
+      force_basic_auth: true
+    uri:
+      url_username: "{{ gns3_user }}"
+      url_password: "{{ gns3_password }}"
+      force_basic_auth: true
 
   tasks:
     - name: Leyendo la topología

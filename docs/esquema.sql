@@ -129,6 +129,7 @@ CREATE TABLE LABORATORIOS (
     ID_DUENO       CHAR(16) CHARACTER SET OCTETS  NOT NULL UNIQUE REFERENCES USUARIOS (ID) ON DELETE CASCADE,
     CONTENEDOR     VARCHAR(40)   NOT NULL UNIQUE,    -- nombre del contenedor en Docker
     PUERTO_BASE    INTEGER       NOT NULL UNIQUE,    -- puerto del GNS3 server
+    TOKEN          VARCHAR(16),                      -- contraseña de GNS3 (usuario = matrícula del dueño)
     CODIGO_EQUIPO  VARCHAR(8)    UNIQUE,             -- NULL = individual
     ESTADO         VARCHAR(12)   DEFAULT 'CREANDO' NOT NULL REFERENCES ESTADOS_LABORATORIO (CLAVE),
     MENSAJE        VARCHAR(300),

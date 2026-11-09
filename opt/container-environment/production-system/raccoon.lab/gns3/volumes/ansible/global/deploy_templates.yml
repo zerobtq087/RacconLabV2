@@ -2,7 +2,16 @@
 - name: Cargar Dispositivos RacconLAB (GNS3 Templates)
   hosts: "{{ target_host }}"
   gather_facts: no
-  # El GNS3 del laboratorio no pide contraseña (el firewall decide quién entra)
+  # El GNS3 server del laboratorio pide usuario y contraseña (token)
+  module_defaults:
+    ansible.builtin.uri:
+      url_username: "{{ gns3_user | default(omit) }}"
+      url_password: "{{ gns3_password | default(omit) }}"
+      force_basic_auth: true
+    uri:
+      url_username: "{{ gns3_user | default(omit) }}"
+      url_password: "{{ gns3_password | default(omit) }}"
+      force_basic_auth: true
   vars:
     # Go manda gns3_url con -e; el host se saca de ahí
     gns3_url: "http://localhost:3080"

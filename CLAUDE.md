@@ -60,12 +60,13 @@ Carpetas como fiber3: backend/{cmd,config,database,domain,repository,handler,mid
   (puente rl-labs0, ICC apagado: un lab no ve a otro; la crea Go si no existe).
 - Cada laboratorio = bloque de 40 puertos publicados 1:1: el primero es el GNS3 server,
   los otros 39 son consolas telnet de los nodos. Máximo 60 laboratorios → rango 30000-32399.
-- El GNS3 server NO pide contraseña (auth = False). Quién entra lo decide el firewall: todos los
-  puertos del lab cerrados; a las IPs con sesión web y acceso al lab se les abre el puerto de GNS3 y
-  SOLO las consolas de los nodos que existen (service/accesos.go + agente raccoon-accesos).
+- El GNS3 server pide usuario/contraseña (auth = True): usuario = matrícula del dueño, contraseña =
+  token de 8 (LABORATORIOS.TOKEN, migración 005). Además el firewall: todos los puertos del lab
+  cerrados; a las IPs con sesión web y acceso al lab se les abre el puerto de GNS3 y SOLO las
+  consolas de los nodos que existen (service/accesos.go lee los nodos con el usuario y token).
   Go NO abre puertos ni hace proxy.
 - Modo equipo: código de 6 letras e invitaciones a compañeros del mismo grupo;
-  todos usan el mismo puerto. El dueño "limpia" (borra contenedor); un miembro solo sale.
+  todos usan el mismo puerto y token. El dueño "limpia" (borra contenedor); un miembro solo sale.
 - Imagen: opt/container-environment/container-images/gns3-workspace/build (Dockerfile + entrypoint.sh).
   Base fija gns3/gns3-server:2.2.61 + pip gns3-server==2.2.59 (la construcción falla si no da 2.2.59).
   Parche en el Dockerfile: GNS3 2.2.59 "recarga" nodos Docker con docker restart (quedan sin eth0
@@ -73,7 +74,8 @@ Carpetas como fiber3: backend/{cmd,config,database,domain,repository,handler,mid
 - Docker interno de cada lab con overlay2 en el volumen `<contenedor>-docker` (/var/lib/docker),
   respaldo a vfs. Remove borra contenedor + volumen (Limpiar y Monitor). ~830 MB por lab.
 - Ansible: opt/container-environment/production-system/raccoon.lab/gns3/volumes/ansible
-  (deploy_templates.yml al crear el lab, deploy_topology.yml para plantillas), sin auth.
+  (deploy_templates.yml al crear el lab, deploy_topology.yml para plantillas), con basic auth
+  (gns3_user = matrícula, gns3_password = token).
 - Plantillas de GNS3: Cisco 7200 (principal, Dynamips, idlepc 0x606df838, 512 MB), Cisco 3725,
   QEMU opcionales solo si existe la imagen (IOSv, IOSvL2, CSR1000v, MikroTik) y
   "Ubuntu RaccoonLAB" (Docker) solo si la imagen está cargada; si no, los hosts son VPCS.
@@ -137,8 +139,8 @@ Carpetas como fiber3: backend/{cmd,config,database,domain,repository,handler,mid
   faltan y qué prefijo usar; gateway de VLAN fuera sugiere el rango. POST /api/plantillas/redes revisa en
   vivo (Plantillas.vue muestra red, máscara y rango debajo de cada campo). Diagramas sobre panel oscuro
   (las imágenes son para fondo oscuro). La calculadora de redes se quitó.
-- "Host requires authentication" en GNS3 de escritorio: quedó marcado Auth de la versión anterior;
-  se desmarca en Preferences → Server.
+- "Host requires authentication" en GNS3 de escritorio = el cliente reintenta con el token del lab
+  anterior tras Limpiar/crear (token nuevo); se arregla poniendo el token nuevo en Preferences.
 - Prácticas con calificación (probado en la laptop con profesor, 2 alumnos en equipo, uno que se une
   después y uno de otro grupo). Migración 003. service/practicas.go: el profesor crea la práctica desde
   un proyecto de SU lab (write memory, detener, exportar; se quitan los .ghost de Dynamips → ~80 KB),
@@ -152,15 +154,16 @@ Carpetas como fiber3: backend/{cmd,config,database,domain,repository,handler,mid
   Ojo Firebird: COALESCE(UUID_TO_CHAR(x), '') rellena con espacios → usar TRIM; un BLOB se lee en struct.
 - Supervisión (service/supervision.go): docente del grupo o admin ve labs, proyectos y configs
   (guardada o actual por consola), descarga/copia (si está encendido pide "detener"), abre a su IP
-  el GNS3 y las consolas del lab 30 min. Todo queda en SUPERVISIONES (bitácora).
+  el puerto de GNS3 (sigue pidiendo el token del alumno, que no recibe) y las consolas 30 min. Todo queda en SUPERVISIONES (bitácora).
 - Filtro dinámico del firewall: el middleware guarda la IP de cada sesión en SESIONES_IP (TrustProxy
   con X-Real-IP de Nginx); GET /api/interno/accesos (clave ACCESOS_TOKEN) da "IP . puerto" de dueños,
   miembros y docentes supervisando; el agente /usr/local/sbin/raccoon-accesos (servicio, cada 1 s)
   reemplaza el set nft `acceso` de la tabla inet raccoon; los puertos de labs se cierran a todo lo demás.
   raccoon-red lo restaura; si la API cae se conserva el último. Probado en contenedor Rocky 9.
-- GNS3 sin contraseña + puertos por nodo + revisor en modo usuario + Inicio por rol (probado en la
-  laptop con red Docker de "computadoras" y el nft/agente generados por raccoon.sh): migración 004
-  (quita LABORATORIOS.TOKEN con aviso a labs viejos, PRACTICAS.ENABLE_PASSWORD; crea LATIDOS).
+- Puertos por nodo + revisor en modo usuario + Inicio por rol (probado en la laptop con red Docker
+  de "computadoras" y el nft/agente generados por raccoon.sh): migración 004 (quita
+  PRACTICAS.ENABLE_PASSWORD; crea LATIDOS). La contraseña de GNS3 se quitó en 3c0ccf7 y volvió con
+  la migración 005 (agrega TOKEN si falta; labs sin token reciben aviso de limpiar y recrear).
   /api/interno/accesos da "IP . puerto"; el agente pregunta cada 1 s (abre/cierra en ~1 s).
   nft: puertos de labs nunca desde docker0/rl-labs0. Revisor: show/ping en modo usuario ("ping IP"
   simple: repeat/timeout son de enable); "enable secret X" se prueba entrando a enable con X;
@@ -168,8 +171,8 @@ Carpetas como fiber3: backend/{cmd,config,database,domain,repository,handler,mid
   GET /api/inicio (service/inicio.go) solo con la parte del rol de la sesión.
 
 ## Pendiente (en este orden)
-1. Probar en la VM: prácticas, supervisión, filtro por nodo y GNS3 sin contraseña (y Avanzada y
-   modo cooperativo, en la escuela). Los labs creados antes de la 004 se limpian y se crean de nuevo.
+1. Probar en la VM: prácticas, supervisión, filtro por nodo y GNS3 con contraseña (y Avanzada y
+   modo cooperativo, en la escuela). Labs sin token (creados sin contraseña) se limpian y se recrean.
 
 ## Proyectos de referencia (solo leer, NUNCA modificar ni copiar su estructura)
 - ~/GoProjects/fiber3 → proyecto del profe. ES EL MODELO a seguir para backend
@@ -182,4 +185,4 @@ Carpetas como fiber3: backend/{cmd,config,database,domain,repository,handler,mid
   - sql/ y la documentación: modelo original de datos y flujo del alumno.
   Lo que YA NO se usa de ahí: JWT (ahora sesión en Redis), net/http (ahora Fiber v3),
   NetworkMode host (ahora bridge con bloque de puertos), proxy en Go del puerto +10000
-  (ahora GNS3 sin contraseña + filtro del firewall por sesión), registro de usuarios (ahora importación CSV/Excel).
+  (ahora el GNS3 server pide usuario y token, más el filtro del firewall por sesión), registro de usuarios (ahora importación CSV/Excel).

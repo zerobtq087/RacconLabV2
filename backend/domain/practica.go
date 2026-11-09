@@ -189,8 +189,10 @@ type EntradaBitacora struct {
 
 // Acceso: una IP que puede usar el bloque de puertos de un lab (para el firewall)
 type Acceso struct {
-	IP     string `gorm:"column:IP"`
-	IDLab  string `gorm:"column:ID_LAB"`
-	Puerto int    `gorm:"column:PUERTO_BASE"` // puerto del GNS3 del lab
-	Estado string `gorm:"column:ESTADO"`      // del lab: solo si CORRIENDO se buscan sus consolas
+	IP      string `gorm:"column:IP"`
+	IDLab   string `gorm:"column:ID_LAB"`
+	Puerto  int    `gorm:"column:PUERTO_BASE"` // puerto del GNS3 del lab
+	Estado  string `gorm:"column:ESTADO"`      // del lab: solo si CORRIENDO se buscan sus consolas
+	Usuario string `gorm:"column:USUARIO"`     // credenciales del GNS3 del lab (para leer sus nodos)
+	Token   string `gorm:"column:TOKEN"`
 }

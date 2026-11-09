@@ -60,7 +60,7 @@ func (s *Accesos) Lista() []string {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			puertos := s.consolas(id, a.Puerto)
+			puertos := s.consolas(a)
 			mu.Lock()
 			consolas[id] = puertos
 			mu.Unlock()
@@ -92,8 +92,9 @@ func (s *Accesos) Lista() []string {
 }
 
 // consolas: los puertos de consola del lab (o los últimos conocidos si su GNS3 no contesta)
-func (s *Accesos) consolas(idLab string, base int) []int {
-	g := NewGNS3(s.env, &domain.Laboratorio{PuertoBase: base})
+func (s *Accesos) consolas(a domain.Acceso) []int {
+	idLab, base := a.IDLab, a.Puerto
+	g := NewGNS3(s.env, &domain.Laboratorio{PuertoBase: base, Usuario: a.Usuario, Token: a.Token})
 	puertos, err := g.PuertosConsola(base+1, base+s.env.LabPuertos-1)
 	s.mu.Lock()
 	defer s.mu.Unlock()

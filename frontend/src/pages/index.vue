@@ -41,7 +41,7 @@
               </div>
               <div class="text-medium-emphasis mt-2">
                 {{ alumno.soy_dueno ? 'Eres el dueño.' : `Laboratorio de ${alumno.lab.dueno}.` }}
-                Sin usuario ni contraseña: entra la computadora donde tienes esta sesión.
+                El usuario y la contraseña de GNS3 están en Mi laboratorio.
               </div>
             </template>
             <div v-else-if="alumno.lab.estado == 'CREANDO'" class="text-medium-emphasis">
@@ -146,7 +146,7 @@
               <li>Inicia sesión en esta página <strong>desde la misma computadora</strong> donde usas GNS3.</li>
               <li>En GNS3: <strong>Edit → Preferences → Server</strong> y desactiva <em>Enable local server</em>.</li>
               <li>Host: <strong>{{ servidor }}</strong>, Port: <strong>{{ alumno.lab.puerto || 'el de tu laboratorio' }}</strong>, protocolo HTTP.</li>
-              <li>Deja <strong>sin marcar</strong> <em>Auth</em>: no lleva usuario ni contraseña.</li>
+              <li>Marca <em>Auth</em> y escribe el usuario y la contraseña que aparecen en <strong>Mi laboratorio</strong>.</li>
               <li>Aplica y abre o crea tu proyecto. Las consolas de cada equipo se abren solas al agregarlo.</li>
             </ol>
           </v-card-text>

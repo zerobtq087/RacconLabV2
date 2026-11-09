@@ -73,8 +73,9 @@
               <v-card-text>
                 <v-alert v-if="consolas" class="mb-4" density="compact" type="info" variant="tonal">
                   Este laboratorio está abierto para tu IP hasta las {{ consolas.hasta }}: las consolas de sus nodos
-                  (<code>telnet {{ servidor }} &lt;puerto&gt;</code>, el puerto de cada nodo está abajo) y su GNS3
-                  (puerto {{ consolas.puerto }}, sin contraseña). Al terminar ciérralo para que vuelva a ser solo del alumno.
+                  (<code>telnet {{ servidor }} &lt;puerto&gt;</code>, el puerto de cada nodo está abajo) y el puerto
+                  {{ consolas.puerto }} de su GNS3, que sigue pidiendo la contraseña del alumno (tú no la recibes).
+                  Al terminar ciérralo para que vuelva a ser solo del alumno.
                 </v-alert>
 
                 <v-select

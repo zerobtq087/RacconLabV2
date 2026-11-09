@@ -19,21 +19,25 @@ import (
 )
 
 // GNS3: cliente mínimo de la API REST del GNS3 de UN laboratorio.
-// El GNS3 del lab no pide contraseña: Go llega por la red interna del
-// servidor (el firewall solo filtra lo que entra por la LAN).
+// Go usa el usuario y token del lab (guardados en Firebird); el docente
+// que supervisa nunca los recibe.
 type GNS3 struct {
-	base  string // http://host:puerto/v2
-	host  string // para las consolas telnet
-	http  *http.Client
-	largo *http.Client // exportar/importar pueden tardar
+	base    string // http://host:puerto/v2
+	host    string // para las consolas telnet
+	usuario string
+	token   string
+	http    *http.Client
+	largo   *http.Client // exportar/importar pueden tardar
 }
 
 func NewGNS3(env *config.Env, lab *domain.Laboratorio) *GNS3 {
 	return &GNS3{
-		base:  fmt.Sprintf("http://%s:%d/v2", env.GNS3Host, lab.PuertoBase),
-		host:  env.GNS3Host,
-		http:  &http.Client{Timeout: 60 * time.Second},
-		largo: &http.Client{Timeout: 10 * time.Minute},
+		base:    fmt.Sprintf("http://%s:%d/v2", env.GNS3Host, lab.PuertoBase),
+		host:    env.GNS3Host,
+		usuario: lab.Usuario,
+		token:   lab.Token,
+		http:    &http.Client{Timeout: 60 * time.Second},
+		largo:   &http.Client{Timeout: 10 * time.Minute},
 	}
 }
 
@@ -58,6 +62,7 @@ func (g *GNS3) peticion(cli *http.Client, metodo, ruta string, cuerpo io.Reader,
 	if err != nil {
 		return nil, err
 	}
+	req.SetBasicAuth(g.usuario, g.token)
 	resp, err := cli.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("no se pudo hablar con el GNS3 del laboratorio: %w", err)
