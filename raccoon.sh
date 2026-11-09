@@ -591,21 +591,49 @@ EOF
 # ---------------------------------------------------------------------
 #  8. Imágenes (crítico)
 # ---------------------------------------------------------------------
+# construir NOMBRE COMANDO...: corre el build hasta 3 veces (las capas que ya
+# salieron quedan en caché, así que cada intento sigue donde se quedó). Si las 3
+# fallan, dice si fue un error de red (descargas de dnf, pip, Go o Yarn) y se detiene.
+construir() {
+    local nombre=$1 intento log
+    shift
+    log=$(mktemp)
+    for intento in 1 2 3; do
+        if "$@" 2>&1 | tee "$log"; then
+            rm -f "$log"
+            return 0
+        fi
+        if ((intento < 3)); then
+            aviso "Falló la construcción de $nombre (intento $intento de 3); se reintenta en $((intento * 15)) s"
+            sleep $((intento * 15))
+        fi
+    done
+    if grep -qiE 'ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|RequestError|i/o timeout|TLS handshake timeout|Temporary failure in name resolution|Could not resolve|Connection (timed out|reset)|Read timed out|network is unreachable' "$log"; then
+        rm -f "$log"
+        error "No se pudo construir $nombre por un ERROR DE RED (se agotó el tiempo descargando paquetes).
+        La red de este servidor está lenta o se cortó; no es un error del código.
+        Revisa la conexión (curl -I https://registry.yarnpkg.com) y vuelve a correr: bash $REPO_DIR/raccoon.sh"
+    fi
+    rm -f "$log"
+    error "No se pudo construir $nombre después de 3 intentos (revisa el error de arriba)"
+}
+
 construir_imagenes() {
     local tmp
     tmp=$(mktemp -d)
 
     paso "Imagen de los laboratorios ($GNS3_WORKSPACE_IMAGE, Docker)"
-    docker build --iidfile "$tmp/gns3" -t "$GNS3_WORKSPACE_IMAGE" "$REPO_DIR/$IMAGES_REL/gns3-workspace/build"
+    construir "la imagen de los laboratorios" \
+        docker build --iidfile "$tmp/gns3" -t "$GNS3_WORKSPACE_IMAGE" "$REPO_DIR/$IMAGES_REL/gns3-workspace/build"
     ID_GNS3=$(id_corto "$(cat "$tmp/gns3")")
 
     paso "Imagen de la API (Podman)"
-    podman build --iidfile "$tmp/api" -t localhost/raccoon-api:latest \
+    construir "la imagen de la API" podman build --iidfile "$tmp/api" -t localhost/raccoon-api:latest \
         -f "$REPO_DIR/$IMAGES_REL/raccoon-api/build/Dockerfile" "$REPO_DIR"
     ID_API=$(id_corto "$(cat "$tmp/api")")
 
     paso "Imagen de AppWeb (Podman)"
-    podman build --iidfile "$tmp/web" -t localhost/raccoon-web:latest \
+    construir "la imagen de AppWeb" podman build --iidfile "$tmp/web" -t localhost/raccoon-web:latest \
         -f "$REPO_DIR/$IMAGES_REL/raccoon-web/build/Dockerfile" "$REPO_DIR"
     ID_WEB=$(id_corto "$(cat "$tmp/web")")
 

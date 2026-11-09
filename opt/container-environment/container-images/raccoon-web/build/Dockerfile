@@ -6,6 +6,11 @@
 FROM docker.io/library/node:22-alpine3.22 AS build
 WORKDIR /app
 
+# Redes lentas: Node 22 prueba IPv6 e IPv4 a la vez ("happy eyeballs") con solo
+# 250 ms por intento y Yarn termina en ETIMEDOUT aunque la red funcione.
+# Se prefiere IPv4 y se da más tiempo a cada intento de conexión.
+ENV NODE_OPTIONS="--dns-result-order=ipv4first --network-family-autoselection-attempt-timeout=2000"
+
 # Primero solo las dependencias (se quedan en caché si no cambia yarn.lock)
 COPY frontend/package.json frontend/yarn.lock frontend/.yarnrc.yml ./
 COPY frontend/.yarn/releases ./.yarn/releases
