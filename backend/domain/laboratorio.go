@@ -8,13 +8,12 @@ type Laboratorio struct {
 	IDDueno    string    `gorm:"column:ID_DUENO" json:"-"`
 	Contenedor string    `gorm:"column:CONTENEDOR" json:"-"`
 	PuertoBase int       `gorm:"column:PUERTO_BASE" json:"puerto"`
-	Token      string    `gorm:"column:TOKEN" json:"token"`
 	Codigo     string    `gorm:"column:CODIGO_EQUIPO" json:"codigo"`
 	Estado     string    `gorm:"column:ESTADO" json:"estado"`
 	Mensaje    string    `gorm:"column:MENSAJE" json:"mensaje"`
 	Inicio     time.Time `gorm:"column:INICIO" json:"inicio"`
-	Dueno      string    `gorm:"column:DUENO" json:"dueno"`     // nombre del dueño
-	Usuario    string    `gorm:"column:USUARIO" json:"usuario"` // usuario de GNS3 (matrícula del dueño)
+	Dueno      string    `gorm:"column:DUENO" json:"dueno"` // nombre del dueño
+	Usuario    string    `gorm:"column:USUARIO" json:"-"`   // matrícula del dueño (nombre de copias)
 }
 
 // EstadoLab: lo que ve el alumno en "Mi laboratorio" (igual que models/Laboratorio.ts)

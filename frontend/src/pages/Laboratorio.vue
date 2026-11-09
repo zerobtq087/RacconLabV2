@@ -1,5 +1,9 @@
 <template>
   <AppFrame>
+    <!-- Mensajes dentro de la página (sin ventanas emergentes) -->
+    <v-alert v-if="mensajeError" class="my-4" closable :text="mensajeError" type="error" variant="tonal" @click:close="mensajeError = ''" />
+    <v-alert v-if="aviso" class="my-4" closable :text="aviso" type="success" variant="tonal" @click:close="aviso = ''" />
+
     <!-- Sin laboratorio -->
     <v-row v-if="lab.estado == 'NINGUNO' || lab.estado == 'ERROR'" class="my-2">
       <v-col cols="12">
@@ -50,9 +54,14 @@
         <template #text>
           <v-alert v-if="lab.mensaje" class="mb-4" type="warning" variant="tonal">{{ lab.mensaje }}</v-alert>
 
+          <p class="mb-2 text-medium-emphasis">
+            Abre <strong>GNS3 2.2.59</strong> en tu computadora, ve a <strong>Edit → Preferences → Server</strong>,
+            desactiva <em>Enable local server</em>, escribe el servidor y el puerto, y deja
+            <strong>sin marcar</strong> <em>Auth</em> (ya no lleva usuario ni contraseña).
+          </p>
           <p class="mb-4 text-medium-emphasis">
-            Abre <strong>GNS3</strong> en tu computadora, ve a <strong>Edit → Preferences → Server</strong>,
-            desactiva <em>Enable local server</em> y escribe estos datos:
+            El servidor solo deja entrar a esta computadora mientras tengas la sesión iniciada en esta página:
+            si cierras sesión, GNS3 y las consolas dejan de responder hasta que vuelvas a entrar.
           </p>
 
           <v-row>
@@ -86,14 +95,26 @@
         </template>
 
         <template #actions>
-          <v-spacer />
-          <v-btn
-            color="error"
-            :loading="procesando"
-            :prepend-icon="lab.soy_dueno ? 'mdi-delete' : 'mdi-logout'"
-            :text="lab.soy_dueno ? 'Limpiar entorno' : 'Salir del equipo'"
-            @click="salir"
-          />
+          <!-- Confirmación dentro de la página -->
+          <v-alert v-if="confirmarSalir" class="ma-2" type="warning" variant="tonal">
+            {{ lab.soy_dueno
+              ? 'Se borrará el laboratorio y todo lo que tenga, también para tu equipo (tus proyectos se conservan).'
+              : 'Saldrás del equipo; podrás volver a unirte con el código.' }}
+            <template #append>
+              <v-btn class="mr-2" text="Cancelar" variant="text" @click="confirmarSalir = false" />
+              <v-btn color="error" text="Sí, continuar" variant="flat" @click="salir" />
+            </template>
+          </v-alert>
+          <template v-else>
+            <v-spacer />
+            <v-btn
+              color="error"
+              :loading="procesando"
+              :prepend-icon="lab.soy_dueno ? 'mdi-delete' : 'mdi-logout'"
+              :text="lab.soy_dueno ? 'Limpiar entorno' : 'Salir del equipo'"
+              @click="confirmarSalir = true"
+            />
+          </template>
         </template>
       </v-card>
 
@@ -162,7 +183,6 @@
 import AppFrame from '../components/AppFrame.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import axios from 'axios'
-import Swal from 'sweetalert2'
 import { type Invitacion, Laboratorio } from '@/models/Laboratorio'
 import type { Persona } from '@/models/Grupo'
 
@@ -175,6 +195,9 @@ const procesando = ref(false)
 const dialogInvitar = ref(false)
 const invitado = ref<string | null>(null)
 
+const mensajeError = ref('')
+const aviso = ref('')
+const confirmarSalir = ref(false)
 const copiado = ref('')   // campo que se acaba de copiar (su botón dice "Copiado")
 
 let timerLab: ReturnType<typeof setTimeout> | undefined
@@ -185,9 +208,7 @@ let timerInv: ReturnType<typeof setInterval> | undefined
 const campos = computed(() => {
   const lista = [
     { label: 'Servidor (Host)', valor: window.location.hostname, md: 6, hint: '' },
-    { label: 'Puerto', valor: lab.value.puerto, md: 6, hint: `Consolas de tus equipos: ${lab.value.puerto + 1} en adelante` },
-    { label: 'Usuario', valor: lab.value.usuario, md: 6, hint: '' },
-    { label: 'Contraseña', valor: lab.value.token, md: 6, hint: '' },
+    { label: 'Puerto', valor: lab.value.puerto, md: 6, hint: 'Las consolas de tus equipos se abren solas al agregarlos' },
   ]
   if (lab.value.codigo) {
     lista.push({ label: 'Código del equipo', valor: lab.value.codigo, md: 12, hint: 'Compártelo con tu equipo para que se unan' })
@@ -211,7 +232,8 @@ function loadInvitaciones () {
 }
 
 function error (err: any, texto: string) {
-  Swal.fire({ icon: 'error', title: 'Error', text: err.response?.data || texto })
+  aviso.value = ''
+  mensajeError.value = typeof err.response?.data == 'string' && err.response.data ? err.response.data : texto
 }
 
 function crear () {
@@ -234,22 +256,12 @@ function unirse () {
 }
 
 function salir () {
-  Swal.fire({
-    icon: 'warning',
-    title: lab.value.soy_dueno ? '¿Limpiar el entorno?' : '¿Salir del equipo?',
-    text: lab.value.soy_dueno ? 'Se borrará el laboratorio y todo lo que tenga, también para tu equipo.' : 'Podrás volver a unirte con el código.',
-    showCancelButton: true,
-    confirmButtonText: 'Sí',
-    cancelButtonText: 'Cancelar',
-    confirmButtonColor: '#d33',
-  }).then(result => {
-    if (!result.isConfirmed) return
-    procesando.value = true
-    axios.delete('/api/labs')
-      .then(() => load())
-      .catch(err => error(err, 'No se pudo completar.'))
-      .finally(() => procesando.value = false)
-  })
+  confirmarSalir.value = false
+  procesando.value = true
+  axios.delete('/api/labs')
+    .then(() => load())
+    .catch(err => error(err, 'No se pudo completar.'))
+    .finally(() => procesando.value = false)
 }
 
 function openInvitar () {
@@ -262,7 +274,9 @@ function invitar () {
   axios.post('/api/labs/invitaciones', { id_usuario: invitado.value })
     .then(() => {
       dialogInvitar.value = false
-      Swal.fire({ icon: 'success', title: 'Invitación enviada', timer: 1500, showConfirmButton: false })
+      mensajeError.value = ''
+      aviso.value = 'Invitación enviada'
+      setTimeout(() => aviso.value = '', 3000)
     })
     .catch(err => error(err, 'No se pudo invitar.'))
 }

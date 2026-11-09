@@ -388,8 +388,12 @@ instalar_reparar_red() {
     cat > "$NFT_ARCHIVO" <<EOF || r=1
 # Generado por raccoon.sh: puertos publicados por contenedores solo desde la LAN.
 # Prioridad "raw" (-300): se revisa antes del DNAT de Docker y Podman (-100).
-# Los puertos de los labs además solo se abren a las IPs del set "acceso"
-# (IP . bloque de puertos), que llena raccoon-accesos con lo que dice la API.
+# Los puertos de los labs están cerrados por defecto: solo se abren los del set
+# "acceso" (IP . puerto: el GNS3 del lab y las consolas de sus nodos), que llena
+# raccoon-accesos con lo que dice la API. GNS3 ya no pide contraseña: este filtro
+# es lo que decide quién entra. Desde las redes de Docker de los labs (rl-labs0,
+# y docker0 de los labs viejos) nunca se abren: un nodo de un lab no llega al GNS3
+# de otro (entre ellos ya no se ven: la red raccoon-labs tiene ICC apagado).
 table inet raccoon
 delete table inet raccoon
 table inet raccoon {
@@ -403,6 +407,7 @@ table inet raccoon {
         iifname "$IFACE" meta nfproto ipv6 tcp dport { 80, ${GNS3_BASE_PORT}-${LAB_FIN} } drop
         iifname "$IFACE" tcp dport ${GNS3_BASE_PORT}-${LAB_FIN} ip saddr . tcp dport @acceso accept
         iifname "$IFACE" tcp dport ${GNS3_BASE_PORT}-${LAB_FIN} drop
+        iifname { "docker0", "rl-labs0" } tcp dport ${GNS3_BASE_PORT}-${LAB_FIN} drop
     }
 }
 EOF
@@ -494,26 +499,27 @@ EOF
 #  7b. Agente raccoon-accesos: filtro dinámico de los puertos de los labs
 #
 #  La API (en Podman) no puede tocar el firewall del servidor, así que este
-#  agente le pregunta cada 2 s qué IPs pueden usar cada bloque de puertos:
-#  las de los usuarios con sesión web vigente que son dueños o miembros del
-#  lab (y el docente mientras supervisa). Con eso reemplaza el set "acceso"
-#  en una sola transacción de nftables (flush + add, sin huecos).
-#  Si la API no responde, deja el set como estaba.
+#  agente le pregunta cada segundo qué puertos abrir y a qué IP: a los usuarios
+#  con sesión web vigente que son dueños o miembros del lab (y al docente
+#  mientras supervisa), el puerto del GNS3 del lab y las consolas de los nodos
+#  que existen (al agregar un nodo se abre su puerto; al borrarlo, se cierra).
+#  Con eso reemplaza el set "acceso" en una sola transacción de nftables
+#  (flush + add, sin huecos). Si la API no responde, deja el set como estaba.
 # ---------------------------------------------------------------------
 instalar_agente_accesos() {
     cat > "$AGENTE_ACCESOS" <<EOF || return 1
 #!/bin/bash
 # Generado por raccoon.sh: abre los puertos de cada laboratorio solo a las IPs
 # de los usuarios con sesión iniciada que tienen acceso a ese laboratorio.
-#   raccoon-accesos           bucle (lo corre raccoon-accesos.service)
+#   raccoon-accesos           bucle cada segundo (lo corre raccoon-accesos.service)
 #   raccoon-accesos aplicar   vuelve a cargar la última lista (lo usa raccoon-red)
 #   raccoon-accesos ver       muestra el set actual
 ENV_FILE="$PROD_DIR/.env"
 ARCHIVO="$ACCESOS_NFT"
 PUERTO_HTTP="$HTTP_PORT"
 IP_SERVIDOR="$IP"
-# Solo se aceptan líneas "IPv4 . inicio-fin" (nada más entra a nftables)
-VALIDA='^[0-9]{1,3}(\.[0-9]{1,3}){3} \. [0-9]{1,5}-[0-9]{1,5}\$'
+# Solo se aceptan líneas "IPv4 . puerto" o "IPv4 . inicio-fin" (nada más entra a nftables)
+VALIDA='^[0-9]{1,3}(\.[0-9]{1,3}){3} \. [0-9]{1,5}(-[0-9]{1,5})?\$'
 
 aplicar() {
     [[ -f "\$ARCHIVO" ]] && nft -f "\$ARCHIVO"
@@ -537,7 +543,7 @@ pedir() {
     token=\$(grep -m1 '^ACCESOS_TOKEN=' "\$ENV_FILE" | cut -d= -f2-)
     [[ -n "\$token" ]] || return 1
     for url in "http://127.0.0.1:\$PUERTO_HTTP" "http://\$IP_SERVIDOR:\$PUERTO_HTTP"; do
-        curl -sf --max-time 4 -H "X-Raccoon-Token: \$token" "\$url/api/interno/accesos" && return 0
+        curl -sf --max-time 3 -H "X-Raccoon-Token: \$token" "\$url/api/interno/accesos" && return 0
     done
     return 1
 }
@@ -551,16 +557,16 @@ case "\${1:-bucle}" in
             if respuesta=\$(pedir); then
                 lista=\$(grep -E "\$VALIDA" <<< "\$respuesta" | sort -u)
                 # Se aplica si cambió, y cada 30 s aunque no cambie (por si recargaron la tabla)
-                if [[ "\$lista" != "\$anterior" || \$vueltas -ge 15 ]]; then
+                if [[ "\$lista" != "\$anterior" || \$vueltas -ge 30 ]]; then
                     escribir "\$lista"
                     if aplicar; then
-                        [[ "\$lista" != "\$anterior" ]] && echo "accesos: \$(grep -c . <<< "\$lista") IP/lab"
+                        [[ "\$lista" != "\$anterior" ]] && echo "accesos: \$(grep -c . <<< "\$lista") IP/puerto"
                         anterior="\$lista" vueltas=0
                     fi
                 fi
             fi
             vueltas=\$((vueltas + 1))
-            sleep 2
+            sleep 1   # un nodo nuevo abre su consola en 1-2 s
         done ;;
 esac
 EOF
@@ -853,7 +859,7 @@ autoprueba() {
     # 7) Filtro dinámico: la API entrega la lista con la clave y el agente corre
     codigo=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H "X-Raccoon-Token: $ACCESOS_TOKEN" "$url/api/interno/accesos" || true)
     if [[ "$codigo" == "200" ]] && systemctl is-active -q raccoon-accesos.service && nft list set inet raccoon acceso >/dev/null 2>&1; then
-        bien "Filtro dinámico activo: los puertos de cada lab solo abren a las IPs con sesión (raccoon-accesos ver)"
+        bien "Filtro dinámico activo: el puerto de cada lab y las consolas de sus nodos solo abren a las IPs con sesión (raccoon-accesos ver)"
     else
         aviso "El filtro dinámico no está listo (API: HTTP $codigo, agente: $(systemctl is-active raccoon-accesos.service))"
         pendiente "Revisa el agente del firewall: systemctl status raccoon-accesos  y  journalctl -u raccoon-accesos"
@@ -868,7 +874,7 @@ autoprueba() {
 # ---------------------------------------------------------------------
 probar_consola_ubuntu() {
     paso "Autoprueba de la consola del host Ubuntu"
-    local nombre="rl-autoprueba" usuario="autoprueba" token base i r=0 resultado
+    local nombre="rl-autoprueba" base i r=0 resultado
     base=$((LAB_FIN - LAB_PUERTOS + 1))
 
     if [[ ! -f "$GNS3_VOLUMES/gns3_images/Docker/$IMAGEN_UBUNTU" ]]; then
@@ -880,13 +886,11 @@ probar_consola_ubuntu() {
         return 0
     fi
 
-    token=$(secreto 8)
     docker rm -f "$nombre" >/dev/null 2>&1 || true
     docker volume rm -f "$nombre-docker" >/dev/null 2>&1 || true
     docker run -d --name "$nombre" --privileged \
         -p "127.0.0.1:$base-$((base + 3)):$base-$((base + 3))" \
         -e GNS3_PORT="$base" -e GNS3_CONSOLE_START=$((base + 1)) -e GNS3_CONSOLE_END=$((base + 3)) \
-        -e GNS3_USER="$usuario" -e GNS3_PASSWORD="$token" \
         -v "$GNS3_VOLUMES/gns3_images/Docker:/root/GNS3/images/Docker:ro" \
         -v "$GNS3_VOLUMES/ansible:/root/ansible:ro" \
         --mount "type=volume,src=$nombre-docker,dst=/var/lib/docker" \
@@ -894,25 +898,24 @@ probar_consola_ubuntu() {
 
     info "Esperando al GNS3 de prueba (carga la imagen Ubuntu)..."
     for ((i = 0; i < 150; i++)); do
-        [[ "$(curl -s -o /dev/null -w '%{http_code}' -u "$usuario:$token" "http://127.0.0.1:$base/v2/version" || true)" == "200" ]] && break
+        [[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$base/v2/version" || true)" == "200" ]] && break
         sleep 2
     done
 
     # Plantillas igual que la API de Go al crear un lab
     docker exec "$nombre" ansible-playbook -i 127.0.0.1, -c local /root/ansible/global/deploy_templates.yml \
-        -e "gns3_url=http://127.0.0.1:$base" -e "gns3_user=$usuario" -e "gns3_password=$token" \
+        -e "gns3_url=http://127.0.0.1:$base" \
         -e target_host=127.0.0.1 >/dev/null 2>&1 || r=1
 
-    resultado=$(python3 -I - "$base" "$usuario" "$token" 2>&1 <<'EOF'
-import base64, json, socket, sys, time, urllib.request
+    resultado=$(python3 -I - "$base" 2>&1 <<'EOF'
+import json, socket, sys, time, urllib.request
 
-base, usuario, token = int(sys.argv[1]), sys.argv[2], sys.argv[3]
-URL = f"http://127.0.0.1:{base}/v2"
-AUTH = "Basic " + base64.b64encode(f"{usuario}:{token}".encode()).decode()
+base = int(sys.argv[1])
+URL = f"http://127.0.0.1:{base}/v2"   # GNS3 sin contraseña (como los labs)
 
 def api(metodo, ruta, datos=None):
     cuerpo = None if datos is None else json.dumps(datos).encode()
-    req = urllib.request.Request(URL + ruta, data=cuerpo, method=metodo, headers={"Authorization": AUTH})
+    req = urllib.request.Request(URL + ruta, data=cuerpo, method=metodo)
     with urllib.request.urlopen(req, timeout=60) as r:
         txt = r.read()
         return json.loads(txt) if txt else None
@@ -1009,7 +1012,7 @@ resumen() {
   Bitácora        : $LOG
   Ver servicios   : podman ps   |   Labs: docker ps
   Si la página deja de cargar (p. ej. tras "firewall-cmd --reload"): raccoon-red
-  Puertos de los labs: solo abren a la IP con sesión en la página (raccoon-accesos ver)
+  Puertos de los labs: cerrados; abren el GNS3 y las consolas de los nodos a la IP con sesión (raccoon-accesos ver)
 =====================================================================
 EOF
 

@@ -56,7 +56,7 @@
                   v-if="!consolas"
                   prepend-icon="mdi-console"
                   size="small"
-                  text="Abrir consolas (30 min)"
+                  text="Abrir consolas y GNS3 a mi IP (30 min)"
                   variant="tonal"
                   @click="abrirConsolas"
                 />
@@ -65,16 +65,16 @@
                   color="warning"
                   prepend-icon="mdi-console"
                   size="small"
-                  text="Cerrar consolas"
+                  text="Cerrar acceso"
                   variant="tonal"
                   @click="cerrarConsolas"
                 />
               </v-card-title>
               <v-card-text>
                 <v-alert v-if="consolas" class="mb-4" density="compact" type="info" variant="tonal">
-                  Las consolas de este laboratorio están abiertas para tu IP hasta las {{ consolas.hasta }}.
-                  Conéctate con <code>telnet {{ servidor }} &lt;puerto&gt;</code> (el puerto de cada nodo está abajo).
-                  El servidor GNS3 del alumno sigue pidiendo su token: tú no lo recibes.
+                  Este laboratorio está abierto para tu IP hasta las {{ consolas.hasta }}: las consolas de sus nodos
+                  (<code>telnet {{ servidor }} &lt;puerto&gt;</code>, el puerto de cada nodo está abajo) y su GNS3
+                  (puerto {{ consolas.puerto }}, sin contraseña). Al terminar ciérralo para que vuelva a ser solo del alumno.
                 </v-alert>
 
                 <v-select
@@ -176,7 +176,7 @@ const proyecto = ref('')
 const nodos = ref<NodoSupervision[]>([])
 const actual = ref(false)
 const cargando = ref(false)
-const consolas = ref<{ hasta: string } | null>(null)
+const consolas = ref<{ hasta: string, puerto: number } | null>(null)
 const pendiente = ref<{ que: string, mensaje: string } | null>(null)
 const bitacora = ref<EntradaBitacora[]>([])
 const error = ref('')
@@ -277,7 +277,10 @@ function elegirProyectoOtraVez () {
 function abrirConsolas () {
   if (!alumno.value) return
   axios.post(`/api/supervision/labs/${alumno.value.id_lab}/consolas`)
-    .then(response => consolas.value = { hasta: new Date(response.data.hasta).toLocaleTimeString('es-MX', { timeStyle: 'short' }) })
+    .then(response => consolas.value = {
+      hasta: new Date(response.data.hasta).toLocaleTimeString('es-MX', { timeStyle: 'short' }),
+      puerto: response.data.puerto,
+    })
     .catch(err => error.value = mensaje(err))
 }
 

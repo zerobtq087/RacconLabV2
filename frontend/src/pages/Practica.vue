@@ -65,6 +65,12 @@
         <v-alert v-if="practica.tiene_entregas" class="mb-4" density="compact" type="info" variant="tonal">
           Ya hay entregas: los criterios quedaron bloqueados.
         </v-alert>
+        <v-alert class="mb-4" density="compact" type="info" variant="tonal">
+          El revisor usa comandos de modo usuario (show ip interface, show ip route, show ip protocols…).
+          Para pedir una contraseña de enable agrega un criterio «Línea en la running-config» con
+          <code>enable secret Redes2026</code>: se prueba entrando a enable con ella, y con esa misma
+          contraseña se leen las demás líneas de la running-config de ese router.
+        </v-alert>
 
         <v-card v-for="(c, i) in criterios" :key="i" border class="mb-3" elevation="0" rounded="lg">
           <v-card-text>
@@ -316,8 +322,15 @@
               label="Grupo"
               variant="outlined"
             />
-            <v-text-field v-model="datos.enable_password" label="Contraseña de enable (opcional)" variant="outlined" />
-            <v-textarea v-model="datos.instrucciones" auto-grow label="Instrucciones" rows="5" variant="outlined" />
+            <v-textarea
+              v-model="datos.instrucciones"
+              auto-grow
+              hint="Todo lo que deben configurar, contraseñas incluidas (ej. enable secret Redes2026)"
+              label="Instrucciones"
+              persistent-hint
+              rows="5"
+              variant="outlined"
+            />
             <div class="text-caption text-medium-emphasis">Proyecto de origen: {{ practica.proyecto_origen }}</div>
           </v-card-text>
           <v-card-actions>
@@ -422,7 +435,7 @@ function cargar () {
     practica.value = Object.assign(new Practica(), response.data)
     criterios.value = practica.value.criterios.map(c => Object.assign(new Criterio(), c))
     datos.value = new SolicitudPractica('', practica.value.nombre, practica.value.id_grupo,
-      practica.value.instrucciones, practica.value.enable_password)
+      practica.value.instrucciones)
     vigilar()
   }).catch(err => {
     if (err.response?.status == 404 || err.response?.status == 403) router.push('/practicas')

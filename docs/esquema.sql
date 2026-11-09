@@ -129,7 +129,6 @@ CREATE TABLE LABORATORIOS (
     ID_DUENO       CHAR(16) CHARACTER SET OCTETS  NOT NULL UNIQUE REFERENCES USUARIOS (ID) ON DELETE CASCADE,
     CONTENEDOR     VARCHAR(40)   NOT NULL UNIQUE,    -- nombre del contenedor en Docker
     PUERTO_BASE    INTEGER       NOT NULL UNIQUE,    -- puerto del GNS3 server
-    TOKEN          VARCHAR(16)   NOT NULL,           -- contraseña para GNS3 escritorio
     CODIGO_EQUIPO  VARCHAR(8)    UNIQUE,             -- NULL = individual
     ESTADO         VARCHAR(12)   DEFAULT 'CREANDO' NOT NULL REFERENCES ESTADOS_LABORATORIO (CLAVE),
     MENSAJE        VARCHAR(300),
@@ -189,7 +188,8 @@ CREATE TABLE DESPLIEGUES (
 -- ---------------------------------------------------------------------
 --  PRÁCTICAS CON CALIFICACIÓN, SUPERVISIÓN Y ACCESO A LOS LABS POR IP
 --  (mismas tablas que docs/migraciones/003_practicas.sql)
---  SESIONES_IP: la IP de cada sesión web abre los puertos de SU lab.
+--  SESIONES_IP: la IP de cada sesión web abre el puerto de SU lab y las
+--  consolas de los nodos que existen (service/accesos.go).
 --  ENTREGAS: PK (práctica, alumno) = una sola entrega por alumno.
 --  REVISIONES.LAB_ACTIVO UNIQUE = una sola revisión a la vez por lab.
 -- ---------------------------------------------------------------------
@@ -217,6 +217,13 @@ CREATE TABLE SUPERVISIONES (
     FECHA       TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
+-- Latido de servicios externos a la API (el agente del firewall raccoon-accesos)
+-- (docs/migraciones/004_sin_token.sql)
+CREATE TABLE LATIDOS (
+    SERVICIO  VARCHAR(30)  NOT NULL PRIMARY KEY,
+    VISTO     TIMESTAMP    NOT NULL
+);
+
 CREATE TABLE ESTADOS_PRACTICA (
     CLAVE        VARCHAR(12)  NOT NULL PRIMARY KEY,
     DESCRIPCION  VARCHAR(40)  NOT NULL
@@ -228,7 +235,6 @@ CREATE TABLE PRACTICAS (
     ID_GRUPO         CHAR(16) CHARACTER SET OCTETS  NOT NULL REFERENCES GRUPOS (ID) ON DELETE CASCADE,
     NOMBRE           VARCHAR(80)   NOT NULL,
     INSTRUCCIONES    BLOB SUB_TYPE TEXT,
-    ENABLE_PASSWORD  VARCHAR(64),
     PROYECTO_ORIGEN  VARCHAR(100),
     ESTADO           VARCHAR(12)   DEFAULT 'EXPORTANDO' NOT NULL REFERENCES ESTADOS_PRACTICA (CLAVE),
     PASO             VARCHAR(120),

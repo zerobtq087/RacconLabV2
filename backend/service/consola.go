@@ -12,9 +12,20 @@ import (
 // Consola: cliente telnet para la consola de un nodo (router IOS o VPCS).
 // Las consolas de GNS3 no piden contraseña; la API llega a ellas por la red
 // interna del servidor (el firewall solo filtra lo que viene de la LAN).
+// Si el alumno puso contraseña en la consola o en enable, el revisor prueba
+// las que el profesor escribió en los criterios de ese router.
 type Consola struct {
-	conn net.Conn
+	conn        net.Conn
+	priv        bool // está en modo privilegiado (#)
+	privInicial bool // ya estaba en # al abrirla (al cerrar no se hace "disable")
 }
+
+var (
+	// ErrSinEnable: el router pide contraseña de enable y no es ninguna de la práctica
+	ErrSinEnable = errors.New("no se pudo entrar a enable con las contraseñas de la práctica")
+	// ErrConsolaConClave: la consola pide contraseña (line con 0) y no es ninguna de la práctica
+	ErrConsolaConClave = errors.New("la consola pide contraseña y no es ninguna de las de la práctica")
+)
 
 // prompt al final de la salida: "R1>", "R1#", "R1(config-if)#", "Host01>"
 var rePrompt = regexp.MustCompile(`([A-Za-z0-9._-]+)(\([^)\r\n]*\))?([>#]) ?$`)
@@ -29,7 +40,15 @@ func AbrirConsola(host string, puerto int) (*Consola, error) {
 	return &Consola{conn: conn}, nil
 }
 
-func (c *Consola) Close() { c.conn.Close() }
+// Close: si el revisor entró a enable, regresa a modo usuario (para no dejarle
+// el # abierto a quien abra la consola después) y cierra la conexión
+func (c *Consola) Close() {
+	if c.priv && !c.privInicial {
+		_ = c.enviar("disable\r")
+		time.Sleep(200 * time.Millisecond)
+	}
+	c.conn.Close()
+}
 
 func (c *Consola) enviar(s string) error {
 	_ = c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
@@ -82,15 +101,22 @@ func terminaEnPrompt(s string) bool {
 	return rePrompt.MatchString(strings.TrimRight(s, " \r\n")) && !strings.HasSuffix(strings.TrimRight(s, "\r\n "), "--More--")
 }
 
-// PrepararIOS deja al router en modo privilegiado (#) y sin paginación.
+// PrepararIOS deja al router en su prompt (">" o "#") y sin paginación.
 // Espera a que arranque (hasta "espera") y atiende el diálogo de configuración
-// inicial, "Press RETURN" y el modo configuración que haya dejado el alumno.
-func (c *Consola) PrepararIOS(enablePassword string, espera time.Duration) error {
+// inicial, "Press RETURN", el modo configuración que haya dejado el alumno y la
+// contraseña de la consola (prueba "claves" en orden). NO entra a enable: los
+// show que usa el revisor funcionan en modo usuario.
+func (c *Consola) PrepararIOS(claves []string, espera time.Duration) error {
 	fin := time.Now().Add(espera)
+	pendientes := claves
+	enter := true
 	for time.Now().Before(fin) {
-		_ = c.enviar("\r")
+		if enter {
+			_ = c.enviar("\r")
+		}
+		enter = true
 		out, _ := c.leer(func(s string) bool {
-			return terminaEnPrompt(s) || strings.Contains(s, "[yes/no]") || strings.Contains(s, "Password:")
+			return terminaEnPrompt(s) || strings.Contains(s, "[yes/no]") || strings.Contains(ultimaLinea(s), "Password:")
 		}, 5*time.Second)
 		final := ultimaLinea(out)
 		switch {
@@ -100,43 +126,74 @@ func (c *Consola) PrepararIOS(enablePassword string, espera time.Duration) error
 		case strings.Contains(final, "[yes/no]"):
 			_ = c.enviar("yes\r")
 		case strings.Contains(final, "Password:"):
-			if enablePassword == "" {
-				return errors.New("el router pide contraseña de enable y la práctica no la tiene registrada")
+			// contraseña de la consola: se prueba la siguiente (IOS da 3 intentos)
+			if len(pendientes) == 0 {
+				return ErrConsolaConClave
 			}
-			_ = c.enviar(enablePassword + "\r")
-			out, _ = c.leer(terminaEnPrompt, 5*time.Second)
-			if strings.HasSuffix(strings.TrimSpace(out), ">") || strings.Contains(ultimaLinea(out), "Password:") {
-				return errors.New("la contraseña de enable de la práctica no es la del router")
-			}
-			fallthrough
+			_ = c.enviar(pendientes[0] + "\r")
+			pendientes = pendientes[1:]
+			enter = false
+			continue
 		case terminaEnPrompt(out):
 			m := rePrompt.FindStringSubmatch(strings.TrimRight(out, " \r\n"))
 			switch {
 			case m == nil: // todavía no hay prompt: otra vuelta
 			case m[2] != "": // (config...)#
 				_ = c.enviar("end\r")
-			case m[3] == ">":
-				_ = c.enviar("enable\r")
-				out, _ = c.leer(func(s string) bool { return terminaEnPrompt(s) || strings.Contains(s, "Password:") }, 5*time.Second)
-				if strings.Contains(ultimaLinea(out), "Password:") {
-					if enablePassword == "" {
-						return errors.New("el router pide contraseña de enable y la práctica no la tiene registrada")
-					}
-					_ = c.enviar(enablePassword + "\r")
-					out, _ = c.leer(terminaEnPrompt, 5*time.Second)
-				}
-				if strings.HasSuffix(strings.TrimSpace(out), "#") {
-					_, err := c.Comando("terminal length 0", 10*time.Second)
-					return err
-				}
-			default: // ya está en #
-				_, err := c.Comando("terminal length 0", 10*time.Second)
+			default: // R1> o R1#
+				c.priv = m[3] == "#"
+				c.privInicial = c.priv
+				_, err := c.Comando("terminal length 0", 10*time.Second) // también en modo usuario
 				return err
 			}
 		}
 		time.Sleep(time.Second)
 	}
 	return errors.New("el router no terminó de arrancar a tiempo")
+}
+
+// Enable entra a modo privilegiado probando "claves" en orden.
+// "pidio" dice si el router pidió contraseña (tiene enable secret/password).
+func (c *Consola) Enable(claves []string) (pidio bool, err error) {
+	if c.priv {
+		return false, nil
+	}
+	pendientes := claves
+	espera := func(s string) bool { return terminaEnPrompt(s) || strings.Contains(ultimaLinea(s), "Password:") }
+	_ = c.enviar("enable\r")
+	for range 12 {
+		out, _ := c.leer(espera, 5*time.Second)
+		switch {
+		case strings.Contains(ultimaLinea(out), "Password:"):
+			pidio = true
+			if len(pendientes) > 0 {
+				_ = c.enviar(pendientes[0] + "\r")
+				pendientes = pendientes[1:]
+			} else {
+				_ = c.enviar("\r") // se agotan los intentos y regresa a ">"
+			}
+		case terminaEnPrompt(out):
+			if strings.HasSuffix(strings.TrimRight(out, " \r\n"), "#") {
+				c.priv = true
+				return pidio, nil
+			}
+			if len(pendientes) == 0 {
+				return pidio, ErrSinEnable
+			}
+			_ = c.enviar("enable\r") // quedan contraseñas: otra ronda de 3 intentos
+		default:
+			_ = c.enviar("\r")
+		}
+	}
+	return pidio, ErrSinEnable
+}
+
+// Disable regresa a modo usuario (para probar enable desde cero)
+func (c *Consola) Disable() {
+	if c.priv {
+		_, _ = c.Comando("disable", 10*time.Second)
+		c.priv = false
+	}
 }
 
 // Comando manda una línea y regresa lo que respondió (sin el eco ni el prompt final)

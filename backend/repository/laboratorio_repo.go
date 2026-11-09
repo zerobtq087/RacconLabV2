@@ -33,7 +33,7 @@ func NewLaboratorioRepository(db *gorm.DB) *LaboratorioRepository {
 
 const columnasLab = `
 	SELECT UUID_TO_CHAR(L.ID) ID, UUID_TO_CHAR(L.ID_DUENO) ID_DUENO, L.CONTENEDOR, L.PUERTO_BASE,
-	       L.TOKEN, COALESCE(L.CODIGO_EQUIPO, '') CODIGO_EQUIPO, L.ESTADO,
+	       COALESCE(L.CODIGO_EQUIPO, '') CODIGO_EQUIPO, L.ESTADO,
 	       COALESCE(L.MENSAJE, '') MENSAJE, L.INICIO, U.NOMBRE DUENO, U.MATRICULA USUARIO
 	FROM LABORATORIOS L
 	JOIN USUARIOS U ON U.ID = L.ID_DUENO`
@@ -127,7 +127,6 @@ func (r *LaboratorioRepository) Reserve(idDueno string, colaborativo bool, puert
 			IDDueno:    idDueno,
 			Contenedor: "rl-lab-" + strings.ToLower(strings.ReplaceAll(idDueno, "-", "")[:12]),
 			PuertoBase: base,
-			Token:      aleatorio(8),
 			Estado:     "CREANDO",
 		}
 		if codigo != nil {
@@ -135,9 +134,9 @@ func (r *LaboratorioRepository) Reserve(idDueno string, colaborativo bool, puert
 		}
 
 		err := r.db.Exec(`
-			INSERT INTO LABORATORIOS (ID, ID_DUENO, CONTENEDOR, PUERTO_BASE, TOKEN, CODIGO_EQUIPO)
-			VALUES (CHAR_TO_UUID(?), CHAR_TO_UUID(?), ?, ?, ?, ?)`,
-			lab.ID, lab.IDDueno, lab.Contenedor, lab.PuertoBase, lab.Token, codigo).Error
+			INSERT INTO LABORATORIOS (ID, ID_DUENO, CONTENEDOR, PUERTO_BASE, CODIGO_EQUIPO)
+			VALUES (CHAR_TO_UUID(?), CHAR_TO_UUID(?), ?, ?, ?)`,
+			lab.ID, lab.IDDueno, lab.Contenedor, lab.PuertoBase, codigo).Error
 		if err == nil {
 			return lab, nil
 		}

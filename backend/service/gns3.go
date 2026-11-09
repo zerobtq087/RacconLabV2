@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,25 +19,21 @@ import (
 )
 
 // GNS3: cliente mínimo de la API REST del GNS3 de UN laboratorio.
-// Go usa el usuario y token del lab (guardados en Firebird); el docente
-// que supervisa nunca los recibe.
+// El GNS3 del lab no pide contraseña: Go llega por la red interna del
+// servidor (el firewall solo filtra lo que entra por la LAN).
 type GNS3 struct {
-	base    string // http://host:puerto/v2
-	host    string // para las consolas telnet
-	usuario string
-	token   string
-	http    *http.Client
-	largo   *http.Client // exportar/importar pueden tardar
+	base  string // http://host:puerto/v2
+	host  string // para las consolas telnet
+	http  *http.Client
+	largo *http.Client // exportar/importar pueden tardar
 }
 
 func NewGNS3(env *config.Env, lab *domain.Laboratorio) *GNS3 {
 	return &GNS3{
-		base:    fmt.Sprintf("http://%s:%d/v2", env.GNS3Host, lab.PuertoBase),
-		host:    env.GNS3Host,
-		usuario: lab.Usuario,
-		token:   lab.Token,
-		http:    &http.Client{Timeout: 60 * time.Second},
-		largo:   &http.Client{Timeout: 10 * time.Minute},
+		base:  fmt.Sprintf("http://%s:%d/v2", env.GNS3Host, lab.PuertoBase),
+		host:  env.GNS3Host,
+		http:  &http.Client{Timeout: 60 * time.Second},
+		largo: &http.Client{Timeout: 10 * time.Minute},
 	}
 }
 
@@ -47,6 +44,7 @@ type NodoGNS3 struct {
 	Tipo        string         `json:"node_type"` // dynamips, docker, vpcs, ethernet_switch, qemu...
 	Estado      string         `json:"status"`    // started, stopped
 	Consola     int            `json:"console"`
+	Aux         int            `json:"aux"`
 	Propiedades map[string]any `json:"properties"`
 	Puertos     []struct {
 		Nombre  string `json:"name"`
@@ -60,7 +58,6 @@ func (g *GNS3) peticion(cli *http.Client, metodo, ruta string, cuerpo io.Reader,
 	if err != nil {
 		return nil, err
 	}
-	req.SetBasicAuth(g.usuario, g.token)
 	resp, err := cli.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("no se pudo hablar con el GNS3 del laboratorio: %w", err)
@@ -250,4 +247,35 @@ func (g *GNS3) ConfigGuardada(proyecto string, n NodoGNS3) (string, error) {
 		return string(b), nil
 	}
 	return "", nil
+}
+
+// PuertosConsola: los puertos de consola (y aux) de todos los nodos de los
+// proyectos abiertos del lab, solo los que caen en [desde, hasta]. Para el
+// firewall una respuesta tardía no sirve: tiempo límite corto.
+func (g *GNS3) PuertosConsola(desde, hasta int) ([]int, error) {
+	rapido := &http.Client{Timeout: 2 * time.Second}
+	var proyectos []domain.ProyectoGNS3
+	if _, err := g.peticion(rapido, http.MethodGet, "/projects", nil, &proyectos); err != nil {
+		return nil, err
+	}
+	puertos := []int{}
+	for _, p := range proyectos {
+		if p.Estado != "opened" {
+			continue // un proyecto cerrado no tiene consolas escuchando
+		}
+		var nodos []NodoGNS3
+		if _, err := g.peticion(rapido, http.MethodGet, "/projects/"+p.ID+"/nodes", nil, &nodos); err != nil {
+			return nil, err
+		}
+		for _, n := range nodos {
+			aux, _ := n.Propiedades["aux"].(float64) // Docker y Dynamips pueden tener consola auxiliar
+			for _, puerto := range []int{n.Consola, n.Aux, int(aux)} {
+				if puerto >= desde && puerto <= hasta && !slices.Contains(puertos, puerto) {
+					puertos = append(puertos, puerto)
+				}
+			}
+		}
+	}
+	slices.Sort(puertos)
+	return puertos, nil
 }

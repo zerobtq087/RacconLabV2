@@ -90,7 +90,8 @@ func SetupRoutes(app *fiber.App, env *config.Env, db *gorm.DB, s *middleware.Ses
 
 	// Prácticas con calificación: el profesor (o admin) las arma desde un proyecto de su lab
 	practicaRepo := repository.NewPracticaRepository(db)
-	practicaHandler := handler.NewPracticaHandler(service.NewPracticas(practicaRepo, laboratorioRepo, docker, env))
+	practicasService := service.NewPracticas(practicaRepo, laboratorioRepo, docker, env)
+	practicaHandler := handler.NewPracticaHandler(practicasService)
 	practicas := api.Group("/practicas", s.Validate, adminProfesor)
 	practicas.Get("/", practicaHandler.Listar)
 	practicas.Get("/proyectos", practicaHandler.Proyectos) // antes de /:id
@@ -115,7 +116,7 @@ func SetupRoutes(app *fiber.App, env *config.Env, db *gorm.DB, s *middleware.Ses
 	misPracticas.Post("/:id/abrir", practicaHandler.Abrir)
 	misPracticas.Post("/:id/entregar", practicaHandler.Entregar)
 
-	// Supervisión: el docente/admin ve los labs de sus alumnos (sin su token)
+	// Supervisión: el docente/admin ve los labs de sus alumnos
 	accesoRepo := repository.NewAccesoRepository(db)
 	supervisionHandler := handler.NewSupervisionHandler(
 		service.NewSupervision(practicaRepo, accesoRepo, laboratorioRepo, docker, env))
@@ -131,7 +132,12 @@ func SetupRoutes(app *fiber.App, env *config.Env, db *gorm.DB, s *middleware.Ses
 
 	// Interno: el agente del firewall (raccoon-accesos) pide las IPs con acceso a
 	// cada lab. Sin sesión; lo protege la clave ACCESOS_TOKEN del .env.
-	api.Get("/interno/accesos", handler.NewInternoHandler(accesoRepo, env).Accesos)
+	api.Get("/interno/accesos", handler.NewInternoHandler(service.NewAccesos(accesoRepo, env), env).Accesos)
+
+	// Inicio: tablero según el rol con el que se entró (un solo endpoint)
+	inicioHandler := handler.NewInicioHandler(service.NewInicio(repository.NewInicioRepository(db),
+		laboratorioRepo, practicasService, practicaRepo, accesoRepo, docker, env))
+	api.Get("/inicio", s.Validate, inicioHandler.Tablero)
 
 	// Monitor de laboratorios (solo admin)
 	api.Get("/monitor", s.Validate, admin, laboratorioHandler.Monitor)

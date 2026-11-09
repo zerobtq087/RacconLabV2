@@ -96,7 +96,6 @@ func (s *Practicas) ProyectosDeMiLab(idUsuario string) ([]domain.ProyectoGNS3, e
 func (s *Practicas) validarSolicitud(idUsuario string, sol *domain.SolicitudPractica) error {
 	sol.Nombre = strings.Join(strings.Fields(sol.Nombre), " ")
 	sol.Instrucciones = strings.TrimSpace(sol.Instrucciones)
-	sol.EnablePassword = strings.TrimSpace(sol.EnablePassword)
 	if n := utf8.RuneCountInString(sol.Nombre); n < 3 || n > 80 {
 		return invalido("El nombre debe tener de 3 a 80 caracteres")
 	}
@@ -108,9 +107,6 @@ func (s *Practicas) validarSolicitud(idUsuario string, sol *domain.SolicitudPrac
 	}
 	if !s.repository.EsAdmin(idUsuario) && !s.repository.EsDocente(idUsuario, sol.IDGrupo) {
 		return invalido("Solo puedes crear prácticas para tus grupos")
-	}
-	if len(sol.EnablePassword) > 64 {
-		return invalido("La contraseña de enable es muy larga")
 	}
 	return nil
 }
@@ -143,12 +139,12 @@ func (s *Practicas) Crear(idUsuario string, sol *domain.SolicitudPractica) (stri
 	if err != nil {
 		return "", err
 	}
-	go s.exportar(id, g, origen.ID, sol.EnablePassword)
+	go s.exportar(id, g, origen.ID)
 	return id, nil
 }
 
 // exportar: guarda la configuración de los routers, detiene el proyecto y lo exporta
-func (s *Practicas) exportar(id string, g *GNS3, proyecto, enable string) {
+func (s *Practicas) exportar(id string, g *GNS3, proyecto string) {
 	falla := func(msg string, err error) {
 		log.Printf("[PRACTICAS] %s: %s: %v", id, msg, err)
 		s.repository.FallaExportar(id, fmt.Sprintf("%s: %v", msg, err))
@@ -158,9 +154,11 @@ func (s *Practicas) exportar(id string, g *GNS3, proyecto, enable string) {
 		return
 	}
 
-	// write memory en cada router encendido: así su configuración entra en la exportación
+	// write memory en cada router encendido: así su configuración entra en la exportación.
+	// Todavía no hay criterios (ni sus contraseñas): si un router pide contraseña de
+	// enable se usa la configuración que el profesor ya guardó y queda en el log.
 	s.repository.Paso(id, "Guardando la configuración de los routers")
-	if r, err := nuevoRevisor(g, s.docker, "", proyecto, enable); err == nil {
+	if r, err := nuevoRevisor(g, s.docker, "", proyecto, nil); err == nil {
 		for _, router := range r.Routers() {
 			if err := r.GuardarConfig(router); err != nil {
 				log.Printf("[PRACTICAS] %s: no se guardó la config de %s: %v", id, router, err)
@@ -686,7 +684,7 @@ func (s *Practicas) ejecutarRevision(idRevision string) {
 		_ = g.Encender(pid)
 	}
 
-	r, err := nuevoRevisor(g, s.docker, lab.Contenedor, pid, p.EnablePassword)
+	r, err := nuevoRevisor(g, s.docker, lab.Contenedor, pid, p.Criterios)
 	if err != nil {
 		falla("No se pudo leer el proyecto: " + err.Error())
 		return
@@ -721,12 +719,13 @@ func (s *Practicas) ejecutarRevision(idRevision string) {
 		sort.Strings(routers)
 		configs := []domain.ConfigNodo{}
 		for _, router := range routers {
-			config, err := r.RunningConfig(router)
-			if err != nil {
-				config = "(no se pudo leer: " + err.Error() + ")"
+			// Con enable: running-config y write memory (la copia del proyecto la incluye).
+			// Sin enable (el alumno puso otra contraseña): lo que dan los show, con un aviso.
+			config, completa := r.ConfigParaDocente(router)
+			if completa {
+				_ = r.GuardarConfig(router)
 			}
 			configs = append(configs, domain.ConfigNodo{Nodo: router, Config: config})
-			_ = r.GuardarConfig(router) // para que la copia del proyecto la incluya
 		}
 		s.repository.GuardarConfigs(idRevision, configs)
 		r.cerrar()

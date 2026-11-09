@@ -6,9 +6,7 @@ export class Laboratorio {
     public mensaje: string = '',
     public soy_dueno: boolean = false,
     public dueno: string = '',           // nombre del dueño
-    public puerto: number = 0,           // puerto público de GNS3
-    public usuario: string = '',         // usuario para entrar a GNS3
-    public token: string = '',           // contraseña para entrar a GNS3
+    public puerto: number = 0,           // puerto público de GNS3 (sin usuario ni contraseña)
     public codigo: string = '',          // código para que otros se unan (solo en equipo)
     public miembros: Persona[] = [],
     public inicio: string = ''

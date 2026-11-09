@@ -330,3 +330,40 @@ func pingVPCS(out string) bool { return strings.Contains(out, "bytes from") }
 
 // dhcpConfigurado: el Edit config del host Ubuntu dice "iface eth0 inet dhcp"
 func dhcpConfigurado(interfaces string) bool { return reDHCP.MatchString(interfaces) }
+
+// ---------------------------------------------------------------------
+// Contraseñas escritas en los criterios (las usa el revisor para entrar)
+// ---------------------------------------------------------------------
+
+// "enable secret Redes2026", "enable password cisco", "enable secret 0 Redes2026"
+var reClaveEnable = regexp.MustCompile(`(?i)^enable\s+(?:secret|password)\s+(?:0\s+)?(\S+)$`)
+
+// cualquier línea que termine en "password X" o "secret X" (consola, enable, usuarios)
+var reClave = regexp.MustCompile(`(?i)\b(?:password|secret)\s+(?:0\s+)?(\S+)$`)
+
+// claveEnable: la contraseña de un criterio "enable secret X" / "enable password X"
+func claveEnable(linea string) (string, bool) {
+	m := reClaveEnable.FindStringSubmatch(strings.TrimSpace(linea))
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// ClavesDeCriterios: por router, las contraseñas escritas en sus criterios de
+// running-config (sin repetir, en orden). Con ellas el revisor contesta el
+// "Password:" de la consola o de enable si el alumno las configuró.
+func ClavesDeCriterios(criterios []domain.Criterio) map[string][]string {
+	claves := map[string][]string{}
+	for _, c := range criterios {
+		if c.Tipo != "LINEA_CONFIG" {
+			continue
+		}
+		m := reClave.FindStringSubmatch(strings.TrimSpace(c.Valor))
+		if m == nil || contiene(claves[c.Nodo], m[1]) {
+			continue
+		}
+		claves[c.Nodo] = append(claves[c.Nodo], m[1])
+	}
+	return claves
+}

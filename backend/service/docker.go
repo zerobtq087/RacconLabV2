@@ -83,6 +83,36 @@ type Contenedor struct {
 	PuertoBase int      // se publican PuertoBase ... PuertoBase+Puertos-1 (mismo número adentro y afuera)
 	Puertos    int
 	ConKVM     bool
+	Red        string // red de Docker (vacía = la bridge por defecto)
+}
+
+const (
+	// RedLabs: red de Docker de los laboratorios. Con ICC apagado un lab no puede
+	// hablar con otro por la red de Docker: GNS3 ya no pide contraseña y un nodo
+	// (p. ej. una Cloud conectada al eth0 del lab) podría llegar al GNS3 de otro.
+	// El puente se llama rl-labs0 para que el filtro nft de raccoon.sh lo ubique.
+	RedLabs    = "raccoon-labs"
+	puenteLabs = "rl-labs0"
+)
+
+// AsegurarRedLabs crea la red de los laboratorios si todavía no existe
+func (d *Docker) AsegurarRedLabs(ctx context.Context) error {
+	if _, err := d.peticion(ctx, http.MethodGet, "/networks/"+RedLabs, nil, nil); err == nil {
+		return nil
+	}
+	_, err := d.peticion(ctx, http.MethodPost, "/networks/create", map[string]any{
+		"Name":   RedLabs,
+		"Driver": "bridge",
+		"Labels": map[string]string{"raccoon.lab": "true"},
+		"Options": map[string]string{
+			"com.docker.network.bridge.enable_icc": "false",
+			"com.docker.network.bridge.name":       puenteLabs,
+		},
+	}, nil)
+	if err != nil && strings.Contains(err.Error(), "already exists") {
+		return nil // la creó la otra réplica al mismo tiempo
+	}
+	return err
 }
 
 type puertoHost struct {
@@ -105,6 +135,7 @@ func (d *Docker) Create(ctx context.Context, c *Contenedor) error {
 		"Binds":         c.Binds,
 		"RestartPolicy": map[string]string{"Name": "unless-stopped"},
 		"PortBindings":  publicados,
+		"NetworkMode":   c.Red,
 		// El Docker interno guarda sus imágenes en un volumen propio del lab:
 		// así puede usar overlay2 (sobre la capa del contenedor solo funciona vfs,
 		// que copia la imagen completa por cada capa y cada nodo)
@@ -282,4 +313,16 @@ func (d *Docker) CopyFile(ctx context.Context, nombre, carpeta, archivo string, 
 		return fmt.Errorf("docker respondió %d al copiar %s: %s", resp.StatusCode, archivo, strings.TrimSpace(string(msg)))
 	}
 	return nil
+}
+
+// Ping dice si Docker responde
+func (d *Docker) Ping(ctx context.Context) bool {
+	_, err := d.peticion(ctx, http.MethodGet, "/_ping", nil, nil)
+	return err == nil
+}
+
+// ImagenExiste dice si Docker tiene la imagen (p. ej. la de los labs)
+func (d *Docker) ImagenExiste(ctx context.Context, imagen string) bool {
+	_, err := d.peticion(ctx, http.MethodGet, "/images/"+url.PathEscape(imagen)+"/json", nil, nil)
+	return err == nil
 }

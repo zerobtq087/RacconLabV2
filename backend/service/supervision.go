@@ -18,7 +18,8 @@ const DuracionSupervision = 30 * time.Minute
 var ErrHayQueDetener = errors.New("el proyecto tiene nodos encendidos: para copiarlo hay que detenerlo (el alumno pierde lo que no haya guardado)")
 
 // Supervision: el docente (o admin) revisa los labs de sus alumnos desde la página.
-// Go habla con el GNS3 del alumno; el docente nunca recibe el token del alumno.
+// Go habla con el GNS3 del alumno. El firewall solo le abre los puertos del lab
+// al docente mientras supervisa (Supervisar, 30 min).
 // Todo lo que consulta queda en la bitácora (SUPERVISIONES).
 type Supervision struct {
 	practicas *repository.PracticaRepository
@@ -99,7 +100,7 @@ func (s *Supervision) Nodos(idUsuario, idLab, proyecto string, actual bool) ([]d
 
 	var r *revisor
 	if actual {
-		if r, err = nuevoRevisor(g, s.docker, lab.Contenedor, proyecto, ""); err != nil {
+		if r, err = nuevoRevisor(g, s.docker, lab.Contenedor, proyecto, nil); err != nil {
 			return nil, err
 		}
 		defer r.cerrar()
@@ -109,7 +110,8 @@ func (s *Supervision) Nodos(idUsuario, idLab, proyecto string, actual bool) ([]d
 		ns := domain.NodoSupervision{Nombre: n.Nombre, Tipo: n.Tipo, Estado: n.Estado, Consola: n.Consola}
 		var e error
 		if actual && n.Tipo == "dynamips" && n.Estado == "started" {
-			ns.Config, e = r.RunningConfig(n.Nombre)
+			// sin la contraseña de enable del alumno: lo que dan los show (con aviso)
+			ns.Config, _ = r.ConfigParaDocente(n.Nombre)
 		} else {
 			ns.Config, e = g.ConfigGuardada(proyecto, n)
 		}
@@ -196,8 +198,8 @@ func (s *Supervision) CopiarAMiLab(idUsuario, idLab, proyecto string, detener bo
 	return copia, nil
 }
 
-// Supervisar: abre en el firewall las consolas del lab para la IP del docente
-// (30 min, se renueva con otra llamada). Sigue sin recibir el token de GNS3.
+// Supervisar: abre en el firewall el GNS3 del lab y las consolas de sus nodos
+// para la IP del docente (30 min, se renueva con otra llamada).
 func (s *Supervision) Supervisar(idUsuario, idLab string) (int, time.Time, error) {
 	lab, err := s.labSupervisado(idUsuario, idLab)
 	if err != nil {

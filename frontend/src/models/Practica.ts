@@ -28,8 +28,7 @@ export class Practica {
     public id_grupo: string = '',
     public grupo: string = '',
     public nombre: string = '',
-    public instrucciones: string = '',
-    public enable_password: string = '',
+    public instrucciones: string = '',   // todo lo que se configura (contraseñas incluidas)
     public proyecto_origen: string = '',
     public estado: string = '',     // EXPORTANDO, BORRADOR, ACTIVA, CERRADA, ERROR
     public paso: string = '',
@@ -51,8 +50,7 @@ export class SolicitudPractica {
     public proyecto: string = '',   // ID del proyecto en mi GNS3 (solo al crear)
     public nombre: string = '',
     public id_grupo: string = '',
-    public instrucciones: string = '',
-    public enable_password: string = ''
+    public instrucciones: string = ''
   ) { }
 }
 

@@ -17,22 +17,28 @@ import (
 //   - switches de GNS3 por la API (ports_mapping).
 //
 // Los nodos se buscan por NOMBRE: al importar, GNS3 les pone IDs nuevos.
+//
+// En los routers se usa el modo usuario (">") siempre que se puede: show ip
+// interface, show ip route, show ip protocols, show ip ospf neighbor y ping.
+// Solo la running-config y el write memory necesitan enable; para eso se prueban
+// las contraseñas que el profesor escribió en los criterios de ESE router
+// (por ejemplo el criterio "enable secret Redes2026").
 type revisor struct {
 	gns3       *GNS3
 	docker     *Docker
 	contenedor string // contenedor Docker del lab
 	proyecto   string
-	enable     string // contraseña de enable de la práctica (si la pide)
+	claves     map[string][]string // contraseñas por router, sacadas de los criterios
 	nodos      map[string]NodoGNS3
 	consolas   map[string]*Consola
 }
 
-func nuevoRevisor(g *GNS3, d *Docker, contenedor, proyecto, enable string) (*revisor, error) {
+func nuevoRevisor(g *GNS3, d *Docker, contenedor, proyecto string, criterios []domain.Criterio) (*revisor, error) {
 	nodos, err := g.Nodos(proyecto)
 	if err != nil {
 		return nil, err
 	}
-	r := &revisor{gns3: g, docker: d, contenedor: contenedor, proyecto: proyecto, enable: enable,
+	r := &revisor{gns3: g, docker: d, contenedor: contenedor, proyecto: proyecto, claves: ClavesDeCriterios(criterios),
 		nodos: map[string]NodoGNS3{}, consolas: map[string]*Consola{}}
 	for _, n := range nodos {
 		r.nodos[n.Nombre] = n
@@ -73,7 +79,7 @@ func (r *revisor) consola(nombre string) (*Consola, error) {
 	if n.Tipo == "vpcs" {
 		err = c.PrepararVPCS()
 	} else {
-		err = c.PrepararIOS(r.enable, 3*time.Minute)
+		err = c.PrepararIOS(r.claves[nombre], 3*time.Minute)
 	}
 	if err != nil {
 		c.Close()
@@ -156,7 +162,17 @@ func (r *revisor) ping(nombre string, destino netip.Addr) (bool, error) {
 		out, err := r.comando(nombre, "ping "+destino.String()+" -c 3")
 		return pingVPCS(out), err
 	default:
-		out, err := r.comando(nombre, "ping "+destino.String()+" repeat 3 timeout 1")
+		// En modo usuario IOS solo acepta "ping IP" (5 paquetes); "repeat" y
+		// "timeout" son de enable: se usan solo si la consola ya está en #
+		c, err := r.consola(nombre)
+		if err != nil {
+			return false, err
+		}
+		cmd := "ping " + destino.String()
+		if c.priv {
+			cmd += " repeat 3 timeout 1"
+		}
+		out, err := r.comando(nombre, cmd)
 		return pingIOS(out), err
 	}
 }
@@ -259,7 +275,15 @@ func (r *revisor) evaluar(c *domain.Criterio) (bool, string, error) {
 		return tipo == "access" && fmt.Sprint(vlan) == c.Valor, obtenido, nil
 
 	case "LINEA_CONFIG":
+		// "enable secret X": la running-config solo muestra el hash, así que se
+		// prueba entrar a enable con X (debe pedirla y aceptarla)
+		if clave, ok := claveEnable(c.Valor); ok {
+			return r.probarEnable(c.Nodo, clave)
+		}
 		config, err := r.RunningConfig(c.Nodo)
+		if errors.Is(err, ErrSinEnable) {
+			return false, "no se pudo entrar a enable con las contraseñas de la práctica", nil
+		}
 		if err != nil {
 			return false, "", err
 		}
@@ -295,8 +319,39 @@ func (r *revisor) evaluar(c *domain.Criterio) (bool, string, error) {
 	return false, "", fmt.Errorf("tipo desconocido %s", c.Tipo)
 }
 
+// privilegiado: entra a enable en el router (con las contraseñas de sus criterios)
+func (r *revisor) privilegiado(nombre string) error {
+	c, err := r.consola(nombre)
+	if err != nil {
+		return err
+	}
+	_, err = c.Enable(r.claves[nombre])
+	return err
+}
+
+// probarEnable: el criterio "enable secret X" se cumple si enable PIDE contraseña
+// y acepta X. El texto es solo para el docente (el alumno ve un mensaje genérico).
+func (r *revisor) probarEnable(nombre, clave string) (bool, string, error) {
+	c, err := r.consola(nombre)
+	if err != nil {
+		return false, "", err
+	}
+	c.Disable() // desde modo usuario, aunque ya estuviera en #
+	pidio, err := c.Enable([]string{clave})
+	switch {
+	case !pidio && err == nil:
+		return false, "enable no pide contraseña", nil
+	case err != nil:
+		return false, "enable no acepta la contraseña que pide la práctica", nil
+	}
+	return true, "enable pide la contraseña y la acepta", nil
+}
+
 // RunningConfig: "show running-config" del router (necesita modo enable)
 func (r *revisor) RunningConfig(nombre string) (string, error) {
+	if err := r.privilegiado(nombre); err != nil {
+		return "", err
+	}
 	out, err := r.comando(nombre, "show running-config")
 	if err != nil {
 		return "", err
@@ -310,8 +365,39 @@ func (r *revisor) RunningConfig(nombre string) (string, error) {
 // GuardarConfig: "write memory" para que la configuración quede en la NVRAM
 // (al detener el nodo, GNS3 la guarda en el proyecto y entra en la exportación)
 func (r *revisor) GuardarConfig(nombre string) error {
+	if err := r.privilegiado(nombre); err != nil {
+		return err
+	}
 	_, err := r.comando(nombre, "write memory")
 	return err
+}
+
+// showsUsuario: lo que se guarda cuando no se puede entrar a enable
+var showsUsuario = []string{"show ip interface brief", "show ip route", "show ip protocols", "show ip ospf neighbor"}
+
+// ConfigParaDocente: la running-config del router; si no se puede entrar a
+// enable, lo que dan los show de modo usuario con un aviso al principio.
+// "completa" = se leyó la running-config (y se puede hacer write memory).
+func (r *revisor) ConfigParaDocente(nombre string) (string, bool) {
+	config, err := r.RunningConfig(nombre)
+	if err == nil {
+		return config, true
+	}
+	if !errors.Is(err, ErrSinEnable) {
+		return "(no se pudo leer: " + err.Error() + ")", false
+	}
+	var b strings.Builder
+	b.WriteString("(No se pudo entrar a enable con las contraseñas de los criterios: no se leyó la\n" +
+		" running-config ni se hizo write memory, así que la copia del proyecto puede no\n" +
+		" tener los últimos cambios. Esto es lo que dan los show en modo usuario.)\n")
+	for _, cmd := range showsUsuario {
+		out, err := r.comando(nombre, cmd)
+		if err != nil {
+			out = "(" + err.Error() + ")"
+		}
+		fmt.Fprintf(&b, "\n%s> %s\n%s\n", nombre, cmd, out)
+	}
+	return b.String(), false
 }
 
 // Routers: los nodos Dynamips encendidos del proyecto

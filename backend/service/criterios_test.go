@@ -3,6 +3,7 @@ package service
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"io"
 	"net/netip"
 	"strings"
@@ -251,5 +252,36 @@ func TestSinGhost(t *testing.T) {
 	}
 	if _, err := sinGhost([]byte("no es zip")); err == nil {
 		t.Error("un archivo que no es zip debe dar error")
+	}
+}
+
+func TestClaveEnable(t *testing.T) {
+	casos := map[string]string{
+		"enable secret Redes2026":   "Redes2026",
+		"enable password cisco":     "cisco",
+		"Enable Secret 0 Redes2026": "Redes2026",
+		"enable secret 5 $1$abc":    "",
+		"hostname R1":               "",
+	}
+	for linea, quiere := range casos {
+		clave, ok := claveEnable(linea)
+		if ok != (quiere != "") || clave != quiere {
+			t.Errorf("%q: %q %v, quería %q", linea, clave, ok, quiere)
+		}
+	}
+}
+
+func TestClavesDeCriterios(t *testing.T) {
+	criterios := []domain.Criterio{
+		{Tipo: "LINEA_CONFIG", Nodo: "R1", Valor: "enable secret Redes2026"},
+		{Tipo: "LINEA_CONFIG", Nodo: "R1", Valor: "password Consola1"},
+		{Tipo: "LINEA_CONFIG", Nodo: "R1", Valor: "enable secret Redes2026"}, // repetida
+		{Tipo: "LINEA_CONFIG", Nodo: "R2", Valor: "hostname R2"},
+		{Tipo: "LINEA_CONFIG", Nodo: "R3", Valor: "username admin secret Adm1n"},
+		{Tipo: "PING", Nodo: "R2", Valor: "password nada"}, // no es de running-config
+	}
+	c := ClavesDeCriterios(criterios)
+	if fmt.Sprint(c["R1"]) != "[Redes2026 Consola1]" || len(c["R2"]) != 0 || fmt.Sprint(c["R3"]) != "[Adm1n]" {
+		t.Errorf("claves: %v", c)
 	}
 }

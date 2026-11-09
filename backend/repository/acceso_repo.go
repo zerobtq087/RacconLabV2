@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"strings"
 	"time"
 
 	"raccoon-lab/backend/domain"
@@ -37,7 +38,7 @@ func (r *AccesoRepository) QuitarSesiones(idUsuario, excepto string) {
 	r.db.Exec(`DELETE FROM SESIONES_IP WHERE ID_USUARIO = CHAR_TO_UUID(?) AND ID_SESION <> ?`, idUsuario, excepto)
 }
 
-// Accesos: las IPs y el puerto base de cada lab al que tienen acceso.
+// Accesos: las IPs y el lab (ID, puerto del GNS3, estado) al que tienen acceso.
 // Las sesiones vencidas (inactividad o tiempo máximo, igual que en Redis) no cuentan.
 func (r *AccesoRepository) Accesos(inactividad, maximo time.Duration) []domain.Acceso {
 	desde := time.Now().Add(-inactividad)
@@ -49,17 +50,20 @@ func (r *AccesoRepository) Accesos(inactividad, maximo time.Duration) []domain.A
 
 	accesos := []domain.Acceso{}
 	r.db.Raw(`
-		SELECT S.IP, L.PUERTO_BASE FROM SESIONES_IP S
+		SELECT S.IP, UUID_TO_CHAR(L.ID) ID_LAB, L.PUERTO_BASE, L.ESTADO FROM SESIONES_IP S
 		JOIN LABORATORIOS L ON L.ID_DUENO = S.ID_USUARIO
 		UNION
-		SELECT S.IP, L.PUERTO_BASE FROM SESIONES_IP S
+		SELECT S.IP, UUID_TO_CHAR(L.ID) ID_LAB, L.PUERTO_BASE, L.ESTADO FROM SESIONES_IP S
 		JOIN LABORATORIO_MIEMBROS M ON M.ID_USUARIO = S.ID_USUARIO
 		JOIN LABORATORIOS L ON L.ID = M.ID_LABORATORIO
 		UNION
-		SELECT S.IP, L.PUERTO_BASE FROM SESIONES_IP S
+		SELECT S.IP, UUID_TO_CHAR(L.ID) ID_LAB, L.PUERTO_BASE, L.ESTADO FROM SESIONES_IP S
 		JOIN SUPERVISIONES_ACTIVAS A ON A.ID_USUARIO = S.ID_USUARIO
 		JOIN LABORATORIOS L ON L.ID = A.ID_LABORATORIO
-		ORDER BY 2, 1`).Scan(&accesos)
+		ORDER BY 3, 1`).Scan(&accesos)
+	for i := range accesos {
+		accesos[i].Estado = strings.TrimSpace(accesos[i].Estado)
+	}
 	return accesos
 }
 
@@ -102,4 +106,19 @@ func (r *AccesoRepository) Bitacoras(idUsuario string, maximo int) []domain.Entr
 		r.db.Raw(consulta+` WHERE S.ID_USUARIO = CHAR_TO_UUID(?) ORDER BY S.FECHA DESC`, maximo, idUsuario).Scan(&lista)
 	}
 	return lista
+}
+
+// Latido: un servicio externo (el agente del firewall) avisó que sigue vivo
+func (r *AccesoRepository) Latido(servicio string) {
+	r.db.Exec(`UPDATE OR INSERT INTO LATIDOS (SERVICIO, VISTO) VALUES (?, CURRENT_TIMESTAMP) MATCHING (SERVICIO)`, servicio)
+}
+
+// UltimoLatido: cuándo avisó por última vez (nil si nunca)
+func (r *AccesoRepository) UltimoLatido(servicio string) *time.Time {
+	var visto []time.Time
+	r.db.Raw(`SELECT VISTO FROM LATIDOS WHERE SERVICIO = ?`, servicio).Scan(&visto)
+	if len(visto) == 0 {
+		return nil
+	}
+	return &visto[0]
 }

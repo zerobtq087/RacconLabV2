@@ -15,7 +15,6 @@ type Practica struct {
 	Grupo          string         `gorm:"column:GRUPO" json:"grupo"`
 	Nombre         string         `gorm:"column:NOMBRE" json:"nombre"`
 	Instrucciones  string         `gorm:"column:INSTRUCCIONES" json:"instrucciones"`
-	EnablePassword string         `gorm:"column:ENABLE_PASSWORD" json:"enable_password"`
 	ProyectoOrigen string         `gorm:"column:PROYECTO_ORIGEN" json:"proyecto_origen"`
 	Estado         string         `gorm:"column:ESTADO" json:"estado"` // EXPORTANDO, BORRADOR, ACTIVA, CERRADA, ERROR
 	Paso           string         `gorm:"column:PASO" json:"paso"`
@@ -53,11 +52,10 @@ type Criterio struct {
 
 // SolicitudPractica: crear o editar (el proyecto solo se indica al crear)
 type SolicitudPractica struct {
-	Proyecto       string `json:"proyecto"` // ID del proyecto en el GNS3 del profesor
-	Nombre         string `json:"nombre"`
-	IDGrupo        string `json:"id_grupo"`
-	Instrucciones  string `json:"instrucciones"`
-	EnablePassword string `json:"enable_password"`
+	Proyecto      string `json:"proyecto"` // ID del proyecto en el GNS3 del profesor
+	Nombre        string `json:"nombre"`
+	IDGrupo       string `json:"id_grupo"`
+	Instrucciones string `json:"instrucciones"` // todo lo que se debe configurar (contraseñas incluidas)
 }
 
 // ProyectoGNS3: un proyecto de un lab (para elegir o supervisar)
@@ -192,5 +190,7 @@ type EntradaBitacora struct {
 // Acceso: una IP que puede usar el bloque de puertos de un lab (para el firewall)
 type Acceso struct {
 	IP     string `gorm:"column:IP"`
-	Puerto int    `gorm:"column:PUERTO_BASE"`
+	IDLab  string `gorm:"column:ID_LAB"`
+	Puerto int    `gorm:"column:PUERTO_BASE"` // puerto del GNS3 del lab
+	Estado string `gorm:"column:ESTADO"`      // del lab: solo si CORRIENDO se buscan sus consolas
 }

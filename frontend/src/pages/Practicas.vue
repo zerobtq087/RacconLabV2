@@ -43,18 +43,12 @@
               no-data-text="No tienes grupos asignados"
               variant="outlined"
             />
-            <v-text-field
-              v-model="form.enable_password"
-              hint="Solo si tus routers piden contraseña para entrar a enable (la usa el revisor)"
-              label="Contraseña de enable (opcional)"
-              persistent-hint
-              variant="outlined"
-            />
             <v-textarea
               v-model="form.instrucciones"
               auto-grow
-              class="mt-3"
+              hint="Escribe aquí todo lo que deben configurar, contraseñas incluidas (ej. enable secret Redes2026)"
               label="Instrucciones para el alumno"
+              persistent-hint
               rows="4"
               variant="outlined"
             />

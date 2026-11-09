@@ -46,7 +46,7 @@ RUN apt-get update --allow-releaseinfo-change && \
 RUN which dynamips vpcs ubridge qemu-system-x86_64 && \
     test "$(gns3server --version)" = "2.2.59"
 
-# La configuración de GNS3 (puerto, consolas, usuario y token) la escribe entrypoint.sh al arrancar
+# La configuración de GNS3 (puerto y consolas; sin usuario ni contraseña) la escribe entrypoint.sh al arrancar
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 

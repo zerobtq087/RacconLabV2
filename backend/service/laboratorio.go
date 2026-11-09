@@ -15,8 +15,9 @@ import (
 )
 
 // Laboratorios crea y destruye los contenedores GNS3.
-// Go NO abre puertos: Docker publica el bloque de cada laboratorio
-// y el propio GNS3 server pide usuario y contraseña (token).
+// Go NO abre puertos: Docker publica el bloque de cada laboratorio y el
+// GNS3 server no pide contraseña; el firewall (raccoon-accesos) decide qué IP
+// puede llegar a cada puerto según la sesión web (ver service/accesos.go).
 type Laboratorios struct {
 	repository *repository.LaboratorioRepository
 	docker     *Docker
@@ -58,8 +59,6 @@ func (s *Laboratorios) levantar(lab *domain.Laboratorio) {
 			"GNS3_PORT=" + strconv.Itoa(base),
 			"GNS3_CONSOLE_START=" + strconv.Itoa(base+1),
 			"GNS3_CONSOLE_END=" + strconv.Itoa(base+s.env.LabPuertos-1),
-			"GNS3_USER=" + lab.Usuario,
-			"GNS3_PASSWORD=" + lab.Token,
 		},
 		Binds: []string{
 			vol + "/gns3_images/QEMU:/root/GNS3/images/QEMU:ro",
@@ -71,6 +70,13 @@ func (s *Laboratorios) levantar(lab *domain.Laboratorio) {
 		PuertoBase: base,
 		Puertos:    s.env.LabPuertos,
 		ConKVM:     true,
+		Red:        RedLabs, // aislado de los otros labs (ICC apagado)
+	}
+
+	if err := s.docker.AsegurarRedLabs(ctx); err != nil {
+		log.Printf("[LABS] red %s: %v", RedLabs, err)
+		s.repository.SetEstado(lab.ID, "ERROR", "No se pudo crear la red de los laboratorios")
+		return
 	}
 
 	// Por si quedó un contenedor huérfano con el mismo nombre
@@ -102,14 +108,13 @@ func (s *Laboratorios) levantar(lab *domain.Laboratorio) {
 	log.Printf("[LABS] %s listo en el puerto %d", c.Nombre, base)
 }
 
-// esperarGNS3 pregunta a /v2/version (con el usuario y token) hasta que responda
+// esperarGNS3 pregunta a /v2/version hasta que responda
 func (s *Laboratorios) esperarGNS3(ctx context.Context, lab *domain.Laboratorio) bool {
 	url := fmt.Sprintf("http://%s:%d/v2/version", s.env.GNS3Host, lab.PuertoBase)
 	cli := &http.Client{Timeout: 3 * time.Second}
 
 	for range 150 { // hasta ~5 minutos (antes de GNS3 se carga la imagen Ubuntu)
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		req.SetBasicAuth(lab.Usuario, lab.Token)
 		if resp, err := cli.Do(req); err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
@@ -132,8 +137,6 @@ func (s *Laboratorios) cargarPlantillas(ctx context.Context, lab *domain.Laborat
 		"ansible-playbook", "-i", "127.0.0.1,", "-c", "local",
 		"/root/ansible/global/deploy_templates.yml",
 		"-e", fmt.Sprintf("gns3_url=http://127.0.0.1:%d", lab.PuertoBase),
-		"-e", "gns3_user=" + lab.Usuario,
-		"-e", "gns3_password=" + lab.Token,
 		"-e", "target_host=127.0.0.1",
 	})
 	if err != nil || codigo != 0 {

@@ -26,7 +26,7 @@ func NewPracticaRepository(db *gorm.DB) *PracticaRepository {
 const columnasPractica = `
 	SELECT UUID_TO_CHAR(P.ID) ID, UUID_TO_CHAR(P.ID_PROFESOR) ID_PROFESOR, COALESCE(U.NOMBRE, '') PROFESOR,
 	       UUID_TO_CHAR(P.ID_GRUPO) ID_GRUPO, G.CODIGO GRUPO, P.NOMBRE,
-	       COALESCE(P.INSTRUCCIONES, '') INSTRUCCIONES, COALESCE(P.ENABLE_PASSWORD, '') ENABLE_PASSWORD,
+	       COALESCE(P.INSTRUCCIONES, '') INSTRUCCIONES,
 	       COALESCE(P.PROYECTO_ORIGEN, '') PROYECTO_ORIGEN, P.ESTADO, COALESCE(P.PASO, '') PASO,
 	       COALESCE(P.MENSAJE, '') MENSAJE, P.CREADA, P.ACTIVADA, P.CERRADA,
 	       (SELECT COUNT(*) FROM ENTREGAS E WHERE E.ID_PRACTICA = P.ID) ENTREGADAS,
@@ -70,9 +70,9 @@ func (r *PracticaRepository) GrupoDe(idUsuario string) string {
 func (r *PracticaRepository) Crear(idProfesor string, s *domain.SolicitudPractica, origen string) (string, error) {
 	id := uuid.NewString()
 	err := r.db.Exec(`
-		INSERT INTO PRACTICAS (ID, ID_PROFESOR, ID_GRUPO, NOMBRE, INSTRUCCIONES, ENABLE_PASSWORD, PROYECTO_ORIGEN, PASO)
-		VALUES (CHAR_TO_UUID(?), CHAR_TO_UUID(?), CHAR_TO_UUID(?), ?, ?, ?, ?, 'Preparando')`,
-		id, idProfesor, s.IDGrupo, s.Nombre, s.Instrucciones, s.EnablePassword, origen).Error
+		INSERT INTO PRACTICAS (ID, ID_PROFESOR, ID_GRUPO, NOMBRE, INSTRUCCIONES, PROYECTO_ORIGEN, PASO)
+		VALUES (CHAR_TO_UUID(?), CHAR_TO_UUID(?), CHAR_TO_UUID(?), ?, ?, ?, 'Preparando')`,
+		id, idProfesor, s.IDGrupo, s.Nombre, s.Instrucciones, origen).Error
 	return id, err
 }
 
@@ -166,8 +166,8 @@ func (r *PracticaRepository) Criterios(id string) []domain.Criterio {
 
 func (r *PracticaRepository) Actualizar(id string, s *domain.SolicitudPractica) error {
 	return r.db.Exec(`
-		UPDATE PRACTICAS SET NOMBRE = ?, ID_GRUPO = CHAR_TO_UUID(?), INSTRUCCIONES = ?, ENABLE_PASSWORD = ?
-		WHERE ID = CHAR_TO_UUID(?)`, s.Nombre, s.IDGrupo, s.Instrucciones, s.EnablePassword, id).Error
+		UPDATE PRACTICAS SET NOMBRE = ?, ID_GRUPO = CHAR_TO_UUID(?), INSTRUCCIONES = ?
+		WHERE ID = CHAR_TO_UUID(?)`, s.Nombre, s.IDGrupo, s.Instrucciones, id).Error
 }
 
 // GuardarCriterios reemplaza todos los criterios (el servicio revisa que no haya entregas)
